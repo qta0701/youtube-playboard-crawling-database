@@ -229,6 +229,23 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, ext
     # 디렉토리 확인 및 생성
     ensure_directory_exists(base_dir)
 
+    # PLAN.md Phase 3.2 - 날짜별 폴더링 추가
+    # output/2026_01_04/ 형식으로 저장
+    date_folder = datetime.now().strftime('%Y_%m_%d')
+    
+    # 타입별 서브 폴더링 (Shorts, Video, Channel)
+    if 'shorts' in target_type.lower():
+        type_folder = 'Shorts'
+    elif 'channel' in target_type.lower():
+        type_folder = 'Channel'
+    elif 'video' in target_type.lower():
+        type_folder = 'Video'
+    else:
+        type_folder = 'Others'
+
+    target_dir = os.path.join(base_dir, date_folder, type_folder)
+    ensure_directory_exists(target_dir)
+
     # 파일명 구성 요소 정제
     safe_target = sanitize_filename(target_type)
     safe_category = sanitize_filename(category)
@@ -241,8 +258,8 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, ext
     # 파일명 생성
     filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{timestamp}.{extension}"
 
-    # 전체 경로
-    filepath = os.path.join(base_dir, filename)
+    # 전체 경로 (날짜별 폴더 내부에 저장)
+    filepath = os.path.join(target_dir, filename)
 
     return filepath, filename
 

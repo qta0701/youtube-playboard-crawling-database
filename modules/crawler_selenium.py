@@ -278,12 +278,8 @@ class PlayboardCrawler:
                         logger.debug(f"Wake up failed: {e}")
 
                 # [PLAN.md Phase 2.1] Throttling 방지용 더미 인터랙션
-                # 마우스 오버나 가벼운 동작으로 브라우저를 Active 상태로 인식시킴
-                try:
-                    body = self.driver.find_element(By.TAG_NAME, 'body')
-                    body.click()  # 클릭으로 포커스 강제
-                except:
-                    pass
+                # click() 제거: 광고 클릭 방지 (2026-01-04)
+                pass
             except Exception as e:
                 logger.debug(f"[System] Visibility check failed: {e}")
 
