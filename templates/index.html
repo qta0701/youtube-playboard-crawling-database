@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Crawler - 마케터 전용 도구</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        select, input[type="date"], input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .radio-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .status-panel {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #e0e0e0;
+            color: #333;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* [PLAN.md Phase 4.1] 경고 메시지 스타일 */
+        .message.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .url-preview {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+            margin-top: 10px;
+            border: 1px solid #dee2e6;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>YouTube Crawler Pro</h1>
+            <p class="subtitle">Playboard 데이터 수집 및 자막 추출 도구</p>
+        </header>
+
+        <div id="message" class="message"></div>
+
+        <div class="card">
+            <h2>크롤링 설정</h2>
+
+            <div class="form-group">
+                <label>타겟 선택</label>
+                <div class="radio-group">
+                    <div class="radio-item">
+                        <input type="radio" id="targetShorts" name="targetType" value="shorts" checked>
+                        <label for="targetShorts">쇼츠</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="targetVideo" name="targetType" value="video">
+                        <label for="targetVideo">영상</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="category">카테고리</label>
+                    <select id="category">
+                        {% for cat in categories %}
+                        <option value="{{ cat }}">{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="checkbox-group" style="margin-top: 8px;">
+                        <input type="checkbox" id="allCategoriesMode">
+                        <label for="allCategoriesMode" style="font-weight: normal; font-size: 0.9em;">모든 카테고리 수집 (전체 제외)</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="country">국가</label>
+                    <select id="country">
+                        {% for country in countries %}
+                        <option value="{{ country }}">{{ country }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>기간 선택</label>
+                <div class="radio-group">
+                    {% for period in periods %}
+                    <div class="radio-item">
+                        <input type="radio" id="period{{ loop.index }}" name="period" value="{{ period }}" {% if loop.first %}checked{% endif %}>
+                        <label for="period{{ loop.index }}">{{ period }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="specificDate">특정 날짜 (선택사항)</label>
+                <input type="date" id="specificDate">
+                <small style="color: #666; margin-top: 5px; display: block;">
+                    날짜를 선택하면 해당 날짜의 랭킹을 조회합니다
+                </small>
+            </div>
+
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="loginMode">
+                    <label for="loginMode">로그인 모드 (200개 수집)</label>
+                </div>
+                <small style="color: #666; margin-top: 5px; display: block;">
+                    비활성화: 100개 / 활성화: 200개
+                </small>
+            </div>
+
+            <div class="info-box">
+                <strong>생성될 URL:</strong>
+                <div id="urlPreview" class="url-preview">URL이 여기에 표시됩니다</div>
+            </div>
+
+            <button class="btn" onclick="startCrawl()">크롤링 시작</button>
+            <button class="btn" onclick="startBatchCrawl()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); margin-top: 10px;">
+                📦 일괄 크롤링 (전체 카테고리)
+            </button>
+        </div>
+
+        <!-- ========== 채널 랭킹 섹션 ========== -->
+        <div class="card" style="border-left: 4px solid #f5576c;">
+            <h2 style="color: #f5576c;">📊 채널 랭킹 수집</h2>
+
+            <div class="form-group">
+                <label>랭킹 기준</label>
+                <div class="radio-group">
+                    <div class="radio-item">
+                        <input type="radio" id="rankTypePopular" name="channelRankType" value="popular" checked>
+                        <label for="rankTypePopular">인기순위 (조회수, 좋아요)</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="rankTypeGrowth" name="channelRankType" value="growth">
+                        <label for="rankTypeGrowth">구독자 급상승 (신규 구독자, 증가폭)</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="channelCategory">카테고리</label>
+                    <select id="channelCategory">
+                        <option value="all">전체</option>
+                        <option value="animals">동물</option>
+                        <option value="music">음악</option>
+                        <option value="gaming">게임</option>
+                        <option value="news">뉴스/정치</option>
+                        <option value="vlog">인물/블로그</option>
+                        <option value="travel">여행/이벤트</option>
+                        <option value="sports">스포츠</option>
+                        <option value="comedy">코메디</option>
+                        <option value="entertainment">엔터테인먼트</option>
+                        <option value="film">영화/애니메이션</option>
+                        <option value="howto">노하우/스타일</option>
+                        <option value="education">교육</option>
+                        <option value="science">과학기술</option>
+                    </select>
+                    <div class="checkbox-group" style="margin-top: 8px;">
+                        <input type="checkbox" id="channelAllCategoriesMode">
+                        <label for="channelAllCategoriesMode" style="font-weight: normal; font-size: 0.9em;">모든 카테고리 수집 (전체 제외)</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="channelCountry">국가</label>
+                    <select id="channelCountry">
+                        <option value="kr" selected>한국</option>
+                        <option value="us">미국</option>
+                        <option value="jp">일본</option>
+                        <option value="global">전세계</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>기간 선택</label>
+                <div class="radio-group" id="channelPeriodGroup">
+                    <div class="radio-item">
+                        <input type="radio" id="channelPeriodDaily" name="channelPeriod" value="daily">
+                        <label for="channelPeriodDaily">일간</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="channelPeriodWeekly" name="channelPeriod" value="weekly" checked>
+                        <label for="channelPeriodWeekly">주간</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="channelPeriodMonthly" name="channelPeriod" value="monthly">
+                        <label for="channelPeriodMonthly">월간</label>
+                    </div>
+                </div>
+                <small id="channelPeriodNote" style="color: #f5576c; margin-top: 5px; display: none;">
+                    ⚠️ 구독자 급상승 순위는 일간을 지원하지 않습니다. 주간/월간만 선택 가능합니다.
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label for="channelRankingDate">랭킹 날짜 (선택사항)</label>
+                <input type="date" id="channelRankingDate">
+            </div>
+
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="channelLoginMode">
+                    <label for="channelLoginMode">로그인 모드 (200개 수집)</label>
+                </div>
+            </div>
+
+            <div class="info-box">
+                <strong>생성될 URL:</strong>
+                <div id="channelUrlPreview" class="url-preview">채널 랭킹 URL이 여기에 표시됩니다</div>
+            </div>
+
+            <button class="btn" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);" onclick="startChannelRankingCrawl()">
+                📊 채널 랭킹 크롤링 시작
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>자막 추출</h2>
+            <div class="form-group">
+                <label>CSV 파일 업로드 (선택사항)</label>
+                <input type="file" id="csvFile" accept=".csv" onchange="handleFileUpload()">
+                <small style="color: #666; margin-top: 5px; display: block;">
+                    업로드하지 않으면 가장 최근 크롤링 결과를 사용합니다
+                </small>
+            </div>
+            <button class="btn btn-secondary" onclick="extractTranscripts()">
+                자막 추출 시작
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>상태 로그</h2>
+            <div id="statusPanel" class="status-panel">
+                <div class="log-entry">준비됨...</div>
+            </div>
+        </div>
+
+        <!-- ========== 수집 현황 대시보드 ========== -->
+        <div class="card" style="border-left: 4px solid #28a745;">
+            <h2 style="color: #28a745;">📈 수집 현황 대시보드</h2>
+
+            <!-- 기간 필터 -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label>조회 기간</label>
+                <div class="radio-group" style="margin-bottom: 10px;">
+                    <div class="radio-item">
+                        <input type="radio" id="statusPeriodDaily" name="statusPeriod" value="daily" checked>
+                        <label for="statusPeriodDaily">일간 (오늘)</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="statusPeriodWeekly" name="statusPeriod" value="weekly">
+                        <label for="statusPeriodWeekly">주간 (7일)</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="statusPeriodMonthly" name="statusPeriod" value="monthly">
+                        <label for="statusPeriodMonthly">월간 (30일)</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="statusPeriodCustom" name="statusPeriod" value="custom">
+                        <label for="statusPeriodCustom">기간 설정</label>
+                    </div>
+                </div>
+                <div id="customDateRange" style="display: none; margin-top: 10px;">
+                    <div class="grid-2">
+                        <div>
+                            <label for="statusStartDate" style="font-size: 0.9em;">시작일</label>
+                            <input type="date" id="statusStartDate">
+                        </div>
+                        <div>
+                            <label for="statusEndDate" style="font-size: 0.9em;">종료일</label>
+                            <input type="date" id="statusEndDate">
+                        </div>
+                    </div>
+                </div>
+                <button class="btn" onclick="loadCollectionStatus()" style="margin-top: 10px; padding: 8px 20px; font-size: 0.9em;">
+                    조회
+                </button>
+                <!-- 기준 날짜 표시 -->
+                <div id="statusDateRange" style="margin-top: 10px; padding: 10px; background: #f0f7ff; border-radius: 6px; font-size: 0.9em; display: none;">
+                    <strong>조회 기간:</strong> <span id="statusDateRangeText">-</span>
+                </div>
+            </div>
+
+            <!-- 요약 통계 -->
+            <div id="collectionSummary" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
+                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 2em; font-weight: bold; color: #1976d2;" id="summaryTotalCrawls">0</div>
+                    <div style="font-size: 0.85em; color: #666;">총 수집 횟수</div>
+                </div>
+                <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 2em; font-weight: bold; color: #388e3c;" id="summaryTotalItems">0</div>
+                    <div style="font-size: 0.85em; color: #666;">총 수집 항목</div>
+                </div>
+                <div style="background: #fff3e0; padding: 15px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 2em; font-weight: bold; color: #f57c00;" id="summaryShorts">0</div>
+                    <div style="font-size: 0.85em; color: #666;">쇼츠</div>
+                </div>
+                <div style="background: #fce4ec; padding: 15px; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 2em; font-weight: bold; color: #c2185b;" id="summaryChannels">0</div>
+                    <div style="font-size: 0.85em; color: #666;">채널</div>
+                </div>
+            </div>
+
+            <!-- 카테고리별 수집 현황 (체크박스 형태) -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- 쇼츠/영상 수집 현황 -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <h4 style="margin-bottom: 12px; color: #667eea;">🎬 쇼츠/영상 수집 현황</h4>
+                    <div id="shortsVideoStatus" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em;">
+                        <!-- 동적으로 생성됨 -->
+                    </div>
+                </div>
+
+                <!-- 채널 수집 현황 -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <h4 style="margin-bottom: 12px; color: #f5576c;">📊 채널 수집 현황</h4>
+                    <div id="channelStatus" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em;">
+                        <!-- 동적으로 생성됨 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 상세 이력 테이블 -->
+            <div style="margin-top: 25px;">
+                <h4 style="margin-bottom: 12px; color: #333;">📋 상세 수집 이력</h4>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead>
+                            <tr style="background: #f8f9fa; position: sticky; top: 0;">
+                                <th style="padding: 8px; text-align: left;">시간</th>
+                                <th style="padding: 8px; text-align: center;">타입</th>
+                                <th style="padding: 8px; text-align: left;">카테고리</th>
+                                <th style="padding: 8px; text-align: center;">국가</th>
+                                <th style="padding: 8px; text-align: center;">기간</th>
+                                <th style="padding: 8px; text-align: center;">수집 수</th>
+                                <th style="padding: 8px; text-align: center;">상태</th>
+                            </tr>
+                        </thead>
+                        <tbody id="collectionHistoryBody">
+                            <tr>
+                                <td colspan="7" style="padding: 20px; text-align: center; color: #666;">
+                                    조회 버튼을 클릭하여 수집 이력을 확인하세요.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 당일 수집 이력 섹션 (간단 버전) -->
+        <div class="card" id="crawlHistorySection">
+            <h2>📋 당일 수집 이력 (실시간)</h2>
+            <div id="todayCrawlHistory" style="max-height: 200px; overflow-y: auto;">
+                <p style="color: #666; font-style: italic;">아직 수집된 이력이 없습니다.</p>
+            </div>
+        </div>
+
+        <!-- ========== 데이터베이스 검색 섹션 ========== -->
+        <div class="card" style="border-left: 4px solid #9c27b0;">
+            <h2 style="color: #9c27b0;">🔍 데이터베이스 검색</h2>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>테이블 선택</label>
+                    <div class="radio-group">
+                        <div class="radio-item">
+                            <input type="radio" id="dbTableShorts" name="dbTable" value="shorts" checked>
+                            <label for="dbTableShorts">쇼츠</label>
+                        </div>
+                        <div class="radio-item">
+                            <input type="radio" id="dbTableVideos" name="dbTable" value="videos">
+                            <label for="dbTableVideos">영상</label>
+                        </div>
+                        <div class="radio-item">
+                            <input type="radio" id="dbTableChannels" name="dbTable" value="channels">
+                            <label for="dbTableChannels">채널</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="dbSearchKeyword">검색어 (제목/채널명)</label>
+                    <input type="text" id="dbSearchKeyword" placeholder="검색어 입력..." style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="dbSearchCategory">카테고리</label>
+                    <select id="dbSearchCategory" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                        <option value="">전체</option>
+                        {% for cat in categories %}
+                        <option value="{{ cat }}">{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="dbSearchCountry">국가</label>
+                    <select id="dbSearchCountry" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                        <option value="">전체</option>
+                        {% for country in countries %}
+                        <option value="{{ country }}">{{ country }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="dbSearchLimit">결과 개수</label>
+                <select id="dbSearchLimit" style="width: 150px; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                    <option value="50">50개</option>
+                    <option value="100" selected>100개</option>
+                    <option value="200">200개</option>
+                    <option value="500">500개</option>
+                </select>
+            </div>
+
+            <button class="btn" onclick="searchDatabase()" style="background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%);">
+                🔍 검색
+            </button>
+
+            <!-- 검색 결과 -->
+            <div id="dbSearchResults" style="margin-top: 20px; display: none;">
+                <h4 style="margin-bottom: 10px;">검색 결과: <span id="dbSearchCount">0</span>개</h4>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead id="dbSearchTableHead" style="position: sticky; top: 0; background: #f8f9fa;">
+                            <tr>
+                                <th style="padding: 8px; text-align: center;">순위</th>
+                                <th style="padding: 8px; text-align: left;">제목/채널명</th>
+                                <th style="padding: 8px; text-align: center;">조회수</th>
+                                <th style="padding: 8px; text-align: center;">카테고리</th>
+                                <th style="padding: 8px; text-align: center;">국가</th>
+                                <th style="padding: 8px; text-align: center;">수집일</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dbSearchTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 크롤링 결과 섹션 (개별 결과 확인용 탭 구조) -->
+        <div class="card" id="resultsSection" style="{% if not crawl_data %}display: none;{% endif %}">
+            <h2>크롤링 결과</h2>
+
+            <!-- 결과 탭 목록 -->
+            <div id="resultTabs" style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <!-- 탭 버튼이 동적으로 추가됨 -->
+            </div>
+
+            <div style="margin-bottom: 15px; display: flex; gap: 20px; align-items: center;">
+                <span style="font-weight: 600;">총 <span id="resultCount">{{ crawl_data|length }}</span>개 항목</span>
+                <span id="resultMeta" style="color: #666; font-size: 0.9em;"></span>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                    <thead id="resultsTableHead">
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 8px; text-align: center;">기간</th>
+                            <th style="padding: 8px; text-align: center; font-size: 0.85em;">랭킹날짜</th>
+                            <th style="padding: 8px; text-align: center;">타입</th>
+                            <th style="padding: 8px; text-align: center;">국가</th>
+                            <th style="padding: 8px; text-align: center; white-space: nowrap;">순위</th>
+                            <th style="padding: 8px; text-align: center; white-space: nowrap;">변동</th>
+                            <th style="padding: 8px; text-align: left; min-width: 200px;">제목</th>
+                            <th style="padding: 8px; text-align: center;">조회수</th>
+                            <th style="padding: 8px; text-align: center;">업로드일</th>
+                            <th style="padding: 8px; text-align: center;">태그</th>
+                            <th style="padding: 8px; text-align: left;">채널명</th>
+                            <th style="padding: 8px; text-align: center;">구독자</th>
+                            <th style="padding: 8px; text-align: center;">썸네일</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsTableBody">
+                        {% for item in crawl_data %}
+                        <tr style="border-bottom: 1px solid #dee2e6;">
+                            <td style="padding: 8px; text-align: center;">{{ item.get('Period', '-') }}</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.85em;">{{ item.get('Ranking Date', '-') }}</td>
+                            <td style="padding: 8px; text-align: center;">{{ item.get('Type', '-') }}</td>
+                            <td style="padding: 8px; text-align: center;">{{ item.get('Country', '-') }}</td>
+                            <td style="padding: 8px; text-align: center;">{{ item['Rank'] }}</td>
+                            <td style="padding: 8px; text-align: center;">
+                                <span style="
+                                    {% if 'NEW' in (item.get('Rank Change', '')|string) %}color: #28a745; font-weight: bold;
+                                    {% elif '+' in (item.get('Rank Change', '')|string) %}color: #28a745;
+                                    {% elif '-' in (item.get('Rank Change', '')|string) %}color: #dc3545;
+                                    {% else %}color: #6c757d;{% endif %}
+                                ">{{ item.get('Rank Change', '0') }}</span>
+                            </td>
+                            <td style="padding: 8px;">{{ item.get('Video Title', 'N/A')[:40] }}{% if item.get('Video Title', '')|length > 40 %}...{% endif %}</td>
+                            <td style="padding: 8px; text-align: center;">{{ item.get('Views', 'N/A') }}</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.85em;">{{ item.get('Upload Date', '-') }}</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.85em;">{{ item.get('Tags', '-')[:20] }}{% if (item.get('Tags', '')|string)|length > 20 %}...{% endif %}</td>
+                            <td style="padding: 8px;">{{ item.get('Channel Name', 'N/A') }}</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.85em;">{{ item.get('Subscribers', '-') }}</td>
+                            <td style="padding: 8px; text-align: center;">
+                                {% if item.get('Thumbnail') and item.get('Thumbnail') != 'N/A' %}
+                                <img src="{{ item.get('Thumbnail') }}" alt="thumb" style="width: 60px; height: auto; border-radius: 4px;">
+                                {% else %}-{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let uploadedVideoIds = [];
+        // 여러번 작업 결과 저장
+        let crawlResults = [];
+        let currentResultIndex = -1;
+        // 당일 수집 이력
+        let todayCrawlHistory = [];
+
+        // URL 미리보기 업데이트
+        function updateUrlPreview() {
+            const targetType = document.querySelector('input[name="targetType"]:checked').value;
+            const category = document.getElementById('category').value;
+            const country = document.getElementById('country').value;
+            const period = document.querySelector('input[name="period"]:checked').value;
+            const specificDate = document.getElementById('specificDate').value;
+
+            let timestamp = null;
+            if (specificDate) {
+                const date = new Date(specificDate);
+                timestamp = Math.floor(date.getTime() / 1000);
+            }
+
+            fetch('/api/build_url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    target_type: targetType,
+                    category: category,
+                    country: country,
+                    period: period,
+                    timestamp: timestamp
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    document.getElementById('urlPreview').textContent = data.url;
+                }
+            })
+            .catch(error => {
+                console.error('URL preview error:', error);
+            });
+        }
+
+        // 이벤트 리스너 등록
+        document.querySelectorAll('input[name="targetType"], input[name="period"]').forEach(el => {
+            el.addEventListener('change', updateUrlPreview);
+        });
+        document.getElementById('category').addEventListener('change', updateUrlPreview);
+        document.getElementById('country').addEventListener('change', updateUrlPreview);
+        document.getElementById('specificDate').addEventListener('change', updateUrlPreview);
+
+        // 페이지 로드 시 URL 미리보기
+        window.addEventListener('load', updateUrlPreview);
+
+        function showMessage(message, type) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.textContent = message;
+            msgDiv.className = `message ${type}`;
+            msgDiv.style.display = 'block';
+            setTimeout(() => {
+                msgDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function addLog(message) {
+            const panel = document.getElementById('statusPanel');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = message;
+            panel.appendChild(entry);
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        async function startCrawl() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '크롤링 중...<span class="loading"></span>';
+
+            const targetType = document.querySelector('input[name="targetType"]:checked').value;
+            const category = document.getElementById('category').value;
+            const country = document.getElementById('country').value;
+            const period = document.querySelector('input[name="period"]:checked').value;
+            const loginMode = document.getElementById('loginMode').checked;
+            const specificDate = document.getElementById('specificDate').value;
+            const allCategoriesMode = document.getElementById('allCategoriesMode').checked;
+
+            // [PLAN.md Phase 4.1] 비로그인 모드 경고
+            if (!loginMode) {
+                showMessage('⚠ WARNING: 비로그인 상태에서는 최대 40개까지만 수집될 수 있습니다. 100개 이상 수집을 원하시면 로그인 모드를 활성화하세요.', 'warning');
+                addLog('⚠ 비로그인 모드: 최대 40개 제한');
+            }
+
+            // 모든 카테고리 수집 모드
+            if (allCategoriesMode) {
+                addLog(`전체 카테고리 크롤링 시작: ${targetType} / ${country} / ${period}`);
+
+                try {
+                    const response = await fetch('/crawl_all_categories', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            target_type: targetType,
+                            country: country,
+                            period: period,
+                            login_mode: loginMode,
+                            specific_date: specificDate
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        showMessage(data.message, 'success');
+                        addLog(`성공: ${data.message}`);
+
+                        if (data.data && data.data.length > 0) {
+                            const meta = {
+                                target_type: targetType,
+                                category: 'ALL (전체 카테고리)',
+                                country: country,
+                                period: period,
+                                total: data.data.length
+                            };
+                            updateResultsTable(data.data, meta);
+                            addTodayCrawlHistory(meta);
+                            // 완료 팝업 알림
+                            showCompletionPopup(`${targetType} / 전체 카테고리 / ${country}`, data.data.length);
+                        }
+                    } else {
+                        showMessage(data.message, 'error');
+                        addLog(`오류: ${data.message}`);
+                    }
+                } catch (error) {
+                    showMessage('전체 카테고리 크롤링 중 오류 발생: ' + error.message, 'error');
+                    addLog('오류: ' + error.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '크롤링 시작';
+                }
+                pollStatus();
+                return;
+            }
+
+            addLog(`크롤링 시작: ${targetType} / ${category} / ${country} / ${period}`);
+
+            try {
+                const response = await fetch('/crawl', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        target_type: targetType,
+                        category: category,
+                        country: country,
+                        period: period,
+                        login_mode: loginMode,
+                        specific_date: specificDate
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    addLog(`성공: ${data.message}`);
+
+                    // 결과 테이블 업데이트 (메타 정보 포함)
+                    if (data.data && data.data.length > 0) {
+                        const meta = {
+                            target_type: targetType,
+                            category: category,
+                            country: country,
+                            period: period,
+                            total: data.summary ? data.summary.total : data.data.length
+                        };
+                        updateResultsTable(data.data, meta);
+                        // 완료 팝업 알림
+                        showCompletionPopup(`${targetType} / ${category} / ${country}`, data.data.length);
+                    }
+                } else {
+                    showMessage(data.message, 'error');
+                    addLog(`오류: ${data.message}`);
+                }
+            } catch (error) {
+                showMessage('크롤링 중 오류 발생: ' + error.message, 'error');
+                addLog('오류: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '크롤링 시작';
+            }
+
+            pollStatus();
+        }
+
+        async function handleFileUpload() {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            addLog('CSV 파일 업로드 중...');
+
+            try {
+                const response = await fetch('/upload_csv', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    uploadedVideoIds = data.video_ids;
+                    showMessage(data.message, 'success');
+                    addLog(`파일 업로드 완료: ${data.video_ids.length}개 비디오 ID 발견`);
+                } else {
+                    showMessage(data.message, 'error');
+                    addLog('오류: ' + data.message);
+                }
+            } catch (error) {
+                showMessage('파일 업로드 중 오류 발생: ' + error.message, 'error');
+                addLog('오류: ' + error.message);
+            }
+        }
+
+        async function extractTranscripts() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '추출 중...<span class="loading"></span>';
+
+            addLog('자막 추출 시작...');
+
+            try {
+                const response = await fetch('/extract_transcripts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_ids: uploadedVideoIds
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    addLog(`성공: ${data.message}`);
+                } else {
+                    showMessage(data.message, 'error');
+                    addLog(`오류: ${data.message}`);
+                }
+            } catch (error) {
+                showMessage('자막 추출 중 오류 발생: ' + error.message, 'error');
+                addLog('오류: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '자막 추출 시작';
+            }
+
+            pollStatus();
+        }
+
+        async function startBatchCrawl() {
+            const targetType = document.querySelector('input[name="targetType"]:checked').value;
+            const country = document.getElementById('country').value;
+            const period = document.querySelector('input[name="period"]:checked').value;
+
+            if (!confirm(`선택한 ${targetType}의 모든 카테고리를 일괄 크롤링하시겠습니까?\n이 작업은 시간이 오래 걸릴 수 있습니다.`)) {
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '일괄 크롤링 중...<span class="loading"></span>';
+
+            addLog(`일괄 크롤링 시작: ${targetType} / ${country} / ${period}`);
+
+            // 로그인 모드 체크 (일괄 크롤링에서도 로그인 모드 지원)
+            const loginMode = document.getElementById('loginMode').checked;
+
+            try {
+                const response = await fetch('/batch_crawl', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        target_type: targetType,
+                        country: country,
+                        period: period,
+                        login_mode: loginMode  // 로그인 모드 파라미터 전달
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    addLog(`성공: ${data.message}`);
+                    addLog(`상세: 성공 ${data.success_count}개, 실패 ${data.fail_count}개`);
+                } else {
+                    showMessage(data.message, 'error');
+                    addLog(`오류: ${data.message}`);
+                }
+            } catch (error) {
+                showMessage('일괄 크롤링 중 오류 발생: ' + error.message, 'error');
+                addLog('오류: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📦 일괄 크롤링 (전체 카테고리)';
+            }
+
+            pollStatus();
+        }
+
+        function updateResultsTable(data, meta = null) {
+            // 결과를 저장 (여러번 작업 지원)
+            const resultEntry = {
+                id: Date.now(),
+                data: data,
+                meta: meta || {},
+                timestamp: new Date().toLocaleTimeString('ko-KR')
+            };
+            crawlResults.push(resultEntry);
+            currentResultIndex = crawlResults.length - 1;
+
+            // 당일 수집 이력에 추가
+            addTodayCrawlHistory(meta);
+
+            // 탭 업데이트
+            updateResultTabs();
+
+            // 테이블 렌더링
+            renderResultTable(data, meta);
+
+            // 결과 섹션 표시 및 스크롤
+            const resultsSection = document.getElementById('resultsSection');
+            resultsSection.style.display = 'block';
+            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function renderResultTable(data, meta = null) {
+            // 결과 개수 업데이트
+            document.getElementById('resultCount').textContent = data.length;
+
+            // 메타 정보 표시
+            if (meta) {
+                const metaStr = [];
+                if (meta.category) metaStr.push(`카테고리: ${meta.category}`);
+                if (meta.period) metaStr.push(`기간: ${meta.period}`);
+                if (meta.country) metaStr.push(`국가: ${meta.country}`);
+                if (meta.target_type) metaStr.push(`타입: ${meta.target_type}`);
+                document.getElementById('resultMeta').textContent = metaStr.join(' | ');
+            }
+
+            // 테이블 바디 업데이트
+            const tbody = document.getElementById('resultsTableBody');
+            tbody.innerHTML = '';
+
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                const title = item['Video Title'] || item['Channel Name'] || 'N/A';
+                const truncatedTitle = title.length > 40 ? title.substring(0, 40) + '...' : title;
+
+                // 순위 변동 스타일
+                const rankChange = item['Rank Change'] || '0';
+                let rankChangeStyle = 'color: #6c757d;';
+                if (rankChange.includes('NEW')) {
+                    rankChangeStyle = 'color: #28a745; font-weight: bold;';
+                } else if (rankChange.includes('+')) {
+                    rankChangeStyle = 'color: #28a745;';
+                } else if (rankChange.includes('-')) {
+                    rankChangeStyle = 'color: #dc3545;';
+                }
+
+                // 조회수 포맷팅
+                let views = item['Views'] || 'N/A';
+                if (typeof views === 'number') {
+                    views = views.toLocaleString();
+                }
+
+                // 태그 처리
+                let tags = item['Tags'] || '-';
+                if (tags && tags.length > 20) {
+                    tags = tags.substring(0, 20) + '...';
+                }
+
+                // 썸네일 처리
+                const thumbnail = item['Thumbnail'];
+                const thumbnailHtml = (thumbnail && thumbnail !== 'N/A')
+                    ? `<img src="${thumbnail}" alt="thumb" style="width: 60px; height: auto; border-radius: 4px;">`
+                    : '-';
+
+                row.innerHTML = `
+                    <td style="padding: 8px; text-align: center;">${item['Period'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 0.85em;">${item['Ranking Date'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center;">${item['Type'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center;">${item['Country'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center;">${item['Rank'] || 'N/A'}</td>
+                    <td style="padding: 8px; text-align: center;"><span style="${rankChangeStyle}">${rankChange}</span></td>
+                    <td style="padding: 8px;">${truncatedTitle}</td>
+                    <td style="padding: 8px; text-align: center;">${views}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 0.85em;">${item['Upload Date'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 0.85em;">${tags}</td>
+                    <td style="padding: 8px;">${item['Channel Name'] || 'N/A'}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 0.85em;">${item['Subscribers'] || '-'}</td>
+                    <td style="padding: 8px; text-align: center;">${thumbnailHtml}</td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        }
+
+        function updateResultTabs() {
+            const tabsContainer = document.getElementById('resultTabs');
+            tabsContainer.innerHTML = '';
+
+            crawlResults.forEach((result, index) => {
+                const tab = document.createElement('button');
+                const meta = result.meta;
+                const label = meta.category ? `${meta.target_type || ''} ${meta.category}` : `결과 ${index + 1}`;
+
+                tab.textContent = `${label} (${result.data.length}개) ${result.timestamp}`;
+                tab.style.cssText = `
+                    padding: 8px 15px;
+                    border: 2px solid ${index === currentResultIndex ? '#667eea' : '#dee2e6'};
+                    background: ${index === currentResultIndex ? '#667eea' : 'white'};
+                    color: ${index === currentResultIndex ? 'white' : '#333'};
+                    border-radius: 20px;
+                    cursor: pointer;
+                    font-size: 0.85em;
+                    transition: all 0.2s;
+                `;
+                tab.onclick = () => {
+                    currentResultIndex = index;
+                    renderResultTable(result.data, result.meta);
+                    updateResultTabs();
+                };
+                tabsContainer.appendChild(tab);
+            });
+        }
+
+        function addTodayCrawlHistory(meta) {
+            if (!meta) return;
+
+            const historyEntry = {
+                timestamp: new Date().toLocaleTimeString('ko-KR'),
+                target_type: meta.target_type || '-',
+                category: meta.category || '-',
+                country: meta.country || '-',
+                period: meta.period || '-',
+                count: meta.total || 0
+            };
+            todayCrawlHistory.push(historyEntry);
+            renderTodayCrawlHistory();
+        }
+
+        function renderTodayCrawlHistory() {
+            const container = document.getElementById('todayCrawlHistory');
+
+            if (todayCrawlHistory.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-style: italic;">아직 수집된 이력이 없습니다.</p>';
+                return;
+            }
+
+            let html = '<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">';
+            html += '<thead><tr style="background: #f8f9fa;">';
+            html += '<th style="padding: 6px; text-align: left;">시간</th>';
+            html += '<th style="padding: 6px; text-align: center;">타입</th>';
+            html += '<th style="padding: 6px; text-align: left;">카테고리</th>';
+            html += '<th style="padding: 6px; text-align: center;">기간</th>';
+            html += '<th style="padding: 6px; text-align: center;">국가</th>';
+            html += '<th style="padding: 6px; text-align: center;">건수</th>';
+            html += '</tr></thead><tbody>';
+
+            todayCrawlHistory.slice().reverse().forEach(entry => {
+                html += `<tr style="border-bottom: 1px solid #eee;">`;
+                html += `<td style="padding: 6px;">${entry.timestamp}</td>`;
+                html += `<td style="padding: 6px; text-align: center;"><span style="background: #667eea; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.8em;">${entry.target_type}</span></td>`;
+                html += `<td style="padding: 6px;">${entry.category}</td>`;
+                html += `<td style="padding: 6px; text-align: center;">${entry.period}</td>`;
+                html += `<td style="padding: 6px; text-align: center;">${entry.country}</td>`;
+                html += `<td style="padding: 6px; text-align: center; font-weight: bold;">${entry.count}개</td>`;
+                html += `</tr>`;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        async function pollStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                const panel = document.getElementById('statusPanel');
+                panel.innerHTML = '';
+                data.logs.forEach(log => {
+                    const entry = document.createElement('div');
+                    entry.className = 'log-entry';
+                    entry.textContent = log;
+                    panel.appendChild(entry);
+                });
+                panel.scrollTop = panel.scrollHeight;
+            } catch (error) {
+                console.error('Status polling error:', error);
+            }
+        }
+
+        setInterval(pollStatus, 3000);
+
+        // ========== 채널 랭킹 관련 함수 ==========
+
+        // 채널 랭킹 URL 미리보기 업데이트
+        function updateChannelUrlPreview() {
+            const rankingType = document.querySelector('input[name="channelRankType"]:checked').value;
+            const category = document.getElementById('channelCategory').value;
+            const country = document.getElementById('channelCountry').value;
+            let period = document.querySelector('input[name="channelPeriod"]:checked').value;
+
+            // 구독자 급상승은 일간 불가
+            if (rankingType === 'growth' && period === 'daily') {
+                period = 'weekly';
+            }
+
+            // 국가/기간 slug 매핑
+            const countryMap = { 'kr': 'south-korea', 'us': 'united-states', 'jp': 'japan', 'global': 'worldwide' };
+            const typeMap = { 'popular': 'most-popular', 'growth': 'most-growth', 'viewed': 'most-viewed' };
+
+            const url = `https://playboard.co/youtube-ranking/${typeMap[rankingType]}-${category}-channels-in-${countryMap[country]}-${period}`;
+            document.getElementById('channelUrlPreview').textContent = url;
+        }
+
+        // 구독자 급상승 선택 시 기간 옵션 제한
+        function handleRankTypeChange() {
+            const rankingType = document.querySelector('input[name="channelRankType"]:checked').value;
+            const dailyRadio = document.getElementById('channelPeriodDaily');
+            const periodNote = document.getElementById('channelPeriodNote');
+
+            if (rankingType === 'growth') {
+                // 일간 비활성화
+                dailyRadio.disabled = true;
+                dailyRadio.parentElement.style.opacity = '0.5';
+                periodNote.style.display = 'block';
+
+                // 일간이 선택되어 있으면 주간으로 변경
+                if (dailyRadio.checked) {
+                    document.getElementById('channelPeriodWeekly').checked = true;
+                }
+            } else {
+                // 일간 활성화
+                dailyRadio.disabled = false;
+                dailyRadio.parentElement.style.opacity = '1';
+                periodNote.style.display = 'none';
+            }
+
+            updateChannelUrlPreview();
+        }
+
+        // 채널 랭킹 크롤링 시작
+        async function startChannelRankingCrawl() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '크롤링 중...<span class="loading"></span>';
+
+            const rankingType = document.querySelector('input[name="channelRankType"]:checked').value;
+            const category = document.getElementById('channelCategory').value;
+            const country = document.getElementById('channelCountry').value;
+            let period = document.querySelector('input[name="channelPeriod"]:checked').value;
+            const loginMode = document.getElementById('channelLoginMode').checked;
+            const rankingDate = document.getElementById('channelRankingDate').value;
+            const allCategoriesMode = document.getElementById('channelAllCategoriesMode').checked;
+
+            // 구독자 급상승은 일간 불가
+            if (rankingType === 'growth' && period === 'daily') {
+                period = 'weekly';
+            }
+
+            const categoryKo = {
+                'all': '전체', 'animals': '동물', 'music': '음악', 'gaming': '게임',
+                'news': '뉴스/정치', 'vlog': '인물/블로그', 'travel': '여행/이벤트',
+                'sports': '스포츠', 'comedy': '코메디', 'entertainment': '엔터테인먼트',
+                'film': '영화/애니메이션', 'howto': '노하우/스타일', 'education': '교육', 'science': '과학기술'
+            };
+            const rankTypeKo = rankingType === 'growth' ? '구독자 급상승' : '인기순위';
+            const periodKo = { 'daily': '일간', 'weekly': '주간', 'monthly': '월간' };
+            const countryKo = { 'kr': '한국', 'us': '미국', 'jp': '일본', 'global': '전세계' };
+
+            // 모든 카테고리 수집 모드
+            if (allCategoriesMode) {
+                addLog(`채널 랭킹 전체 카테고리 크롤링 시작: ${rankTypeKo} / ${countryKo[country]} / ${periodKo[period]}`);
+
+                try {
+                    const response = await fetch('/crawl_channel_ranking_all', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            ranking_type: rankingType,
+                            country: country,
+                            period: period,
+                            login_mode: loginMode,
+                            ranking_date: rankingDate
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        showMessage(data.message, 'success');
+                        addLog(`성공: ${data.message}`);
+
+                        if (data.data && data.data.length > 0) {
+                            const meta = {
+                                target_type: `채널(${rankTypeKo})`,
+                                category: 'ALL (전체 카테고리)',
+                                country: countryKo[country],
+                                period: periodKo[period],
+                                total: data.data.length
+                            };
+                            updateChannelRankingTable(data.data, meta, rankingType);
+                            addTodayCrawlHistory(meta);
+                            // 완료 팝업 알림
+                            showCompletionPopup(`채널(${rankTypeKo}) / 전체 카테고리 / ${countryKo[country]}`, data.data.length);
+                        }
+                    } else {
+                        showMessage(data.message, 'error');
+                        addLog(`오류: ${data.message}`);
+                    }
+                } catch (error) {
+                    showMessage('채널 랭킹 전체 카테고리 크롤링 중 오류 발생: ' + error.message, 'error');
+                    addLog('오류: ' + error.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = '📊 채널 랭킹 크롤링 시작';
+                }
+                pollStatus();
+                return;
+            }
+
+            addLog(`채널 랭킹 크롤링 시작: ${rankTypeKo} / ${categoryKo[category]} / ${countryKo[country]} / ${periodKo[period]}`);
+
+            try {
+                const response = await fetch('/crawl_channel_ranking', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        ranking_type: rankingType,
+                        category: category,
+                        country: country,
+                        period: period,
+                        login_mode: loginMode,
+                        ranking_date: rankingDate
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showMessage(data.message, 'success');
+                    addLog(`성공: ${data.message}`);
+
+                    // 결과 테이블 업데이트
+                    if (data.data && data.data.length > 0) {
+                        const meta = {
+                            target_type: `채널(${rankTypeKo})`,
+                            category: categoryKo[category],
+                            country: countryKo[country],
+                            period: periodKo[period],
+                            total: data.data.length
+                        };
+
+                        // 채널 랭킹용 테이블 렌더링
+                        updateChannelRankingTable(data.data, meta, rankingType);
+                        addTodayCrawlHistory(meta);
+                        // 완료 팝업 알림
+                        showCompletionPopup(`채널(${rankTypeKo}) / ${categoryKo[category]} / ${countryKo[country]}`, data.data.length);
+                    }
+                } else {
+                    showMessage(data.message, 'error');
+                    addLog(`오류: ${data.message}`);
+                }
+            } catch (error) {
+                showMessage('채널 랭킹 크롤링 중 오류 발생: ' + error.message, 'error');
+                addLog('오류: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📊 채널 랭킹 크롤링 시작';
+            }
+
+            pollStatus();
+        }
+
+        // 채널 랭킹 결과 테이블 업데이트
+        function updateChannelRankingTable(data, meta, rankingType) {
+            // 결과 섹션 표시
+            document.getElementById('resultsSection').style.display = 'block';
+
+            // 결과 저장 및 탭 업데이트
+            crawlResults.push({
+                data: data,
+                meta: meta,
+                timestamp: new Date().toLocaleTimeString('ko-KR')
+            });
+            currentResultIndex = crawlResults.length - 1;
+            updateResultTabs();
+
+            // 채널 랭킹용 테이블 렌더링
+            renderChannelRankingTable(data, meta, rankingType);
+        }
+
+        // 채널 랭킹 테이블 렌더링
+        // CSV 컬럼 순서에 맞춤:
+        // Growth: Rank, Rank Change, Channel Name, Profile Image, Total Subscribers, New Subscribers, Growth Rate, Video Count, Tags, Country, Period, Ranking Date, Category, Ranking Type, Type
+        // Popular: Rank, Rank Change, Channel Name, Profile Image, Views, Likes, Video Count, Tags, Country, Period, Ranking Date, Category, Ranking Type, Type
+        function renderChannelRankingTable(data, meta, rankingType) {
+            document.getElementById('resultCount').textContent = data.length;
+
+            if (meta) {
+                const metaStr = [];
+                if (meta.category) metaStr.push(`카테고리: ${meta.category}`);
+                if (meta.period) metaStr.push(`기간: ${meta.period}`);
+                if (meta.country) metaStr.push(`국가: ${meta.country}`);
+                if (meta.target_type) metaStr.push(`타입: ${meta.target_type}`);
+                document.getElementById('resultMeta').textContent = metaStr.join(' | ');
+            }
+
+            // 테이블 헤더 변경
+            const thead = document.getElementById('resultsTableHead');
+            if (rankingType === 'growth') {
+                thead.innerHTML = `
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 8px; text-align: center;">순위</th>
+                        <th style="padding: 8px; text-align: center;">변동</th>
+                        <th style="padding: 8px; text-align: left; min-width: 150px;">채널명</th>
+                        <th style="padding: 8px; text-align: center;">프로필</th>
+                        <th style="padding: 8px; text-align: center;">전체 구독자</th>
+                        <th style="padding: 8px; text-align: center;">신규 구독자</th>
+                        <th style="padding: 8px; text-align: center;">증가폭</th>
+                        <th style="padding: 8px; text-align: center;">영상수</th>
+                        <th style="padding: 8px; text-align: center;">태그</th>
+                        <th style="padding: 8px; text-align: center;">국가</th>
+                        <th style="padding: 8px; text-align: center;">기간</th>
+                        <th style="padding: 8px; text-align: center;">랭킹날짜</th>
+                        <th style="padding: 8px; text-align: center;">카테고리</th>
+                        <th style="padding: 8px; text-align: center;">랭킹타입</th>
+                    </tr>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 8px; text-align: center;">순위</th>
+                        <th style="padding: 8px; text-align: center;">변동</th>
+                        <th style="padding: 8px; text-align: left; min-width: 150px;">채널명</th>
+                        <th style="padding: 8px; text-align: center;">프로필</th>
+                        <th style="padding: 8px; text-align: center;">조회수</th>
+                        <th style="padding: 8px; text-align: center;">좋아요</th>
+                        <th style="padding: 8px; text-align: center;">영상수</th>
+                        <th style="padding: 8px; text-align: center;">태그</th>
+                        <th style="padding: 8px; text-align: center;">국가</th>
+                        <th style="padding: 8px; text-align: center;">기간</th>
+                        <th style="padding: 8px; text-align: center;">랭킹날짜</th>
+                        <th style="padding: 8px; text-align: center;">카테고리</th>
+                        <th style="padding: 8px; text-align: center;">랭킹타입</th>
+                    </tr>
+                `;
+            }
+
+            const tbody = document.getElementById('resultsTableBody');
+            tbody.innerHTML = '';
+
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                // 순위 변동 스타일
+                const rankChange = item['Rank Change'] || '0';
+                let rankChangeStyle = 'color: #6c757d;';
+                if (String(rankChange).includes('NEW')) {
+                    rankChangeStyle = 'color: #28a745; font-weight: bold;';
+                } else if (String(rankChange).includes('+')) {
+                    rankChangeStyle = 'color: #28a745;';
+                } else if (String(rankChange).includes('-')) {
+                    rankChangeStyle = 'color: #dc3545;';
+                }
+
+                // 프로필 이미지
+                const profileImg = item['Profile Image'];
+                const imgHtml = (profileImg && profileImg !== 'N/A')
+                    ? `<img src="${profileImg}" alt="profile" style="width: 40px; height: 40px; border-radius: 50%;">`
+                    : '-';
+
+                // 태그 처리 (길면 자르기)
+                let tags = item['Tags'] || '-';
+                if (tags && tags.length > 20) {
+                    tags = tags.substring(0, 20) + '...';
+                }
+
+                // 랭킹 타입 한글 표시
+                const rankingTypeKo = item['Ranking Type'] || (rankingType === 'growth' ? '구독자 급상승' : '인기순위');
+
+                // 랭킹 타입에 따라 다른 컬럼 표시 (CSV 컬럼 순서에 맞춤)
+                if (rankingType === 'growth') {
+                    // 구독자 급상승: Rank, Rank Change, Channel Name, Profile Image, Total Subscribers, New Subscribers, Growth Rate, Video Count, Tags, Country, Period, Ranking Date, Category, Ranking Type
+                    row.innerHTML = `
+                        <td style="padding: 8px; text-align: center;">${item['Rank'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;"><span style="${rankChangeStyle}">${rankChange}</span></td>
+                        <td style="padding: 8px;">${item['Channel Name'] || 'N/A'}</td>
+                        <td style="padding: 8px; text-align: center;">${imgHtml}</td>
+                        <td style="padding: 8px; text-align: center;">${(item['Total Subscribers'] || 0).toLocaleString()}</td>
+                        <td style="padding: 8px; text-align: center;">${(item['New Subscribers'] || 0).toLocaleString()}</td>
+                        <td style="padding: 8px; text-align: center; color: #28a745; font-weight: bold;">${item['Growth Rate'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Video Count'] || '-'}</td>
+                        <td style="padding: 8px; font-size: 0.85em;">${tags}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Country'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Period'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center; font-size: 0.85em;">${item['Ranking Date'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Category'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;"><span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.8em;">${rankingTypeKo}</span></td>
+                    `;
+                } else {
+                    // 인기순위: Rank, Rank Change, Channel Name, Profile Image, Views, Likes, Video Count, Tags, Country, Period, Ranking Date, Category, Ranking Type
+                    row.innerHTML = `
+                        <td style="padding: 8px; text-align: center;">${item['Rank'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;"><span style="${rankChangeStyle}">${rankChange}</span></td>
+                        <td style="padding: 8px;">${item['Channel Name'] || 'N/A'}</td>
+                        <td style="padding: 8px; text-align: center;">${imgHtml}</td>
+                        <td style="padding: 8px; text-align: center;">${(item['Views'] || 0).toLocaleString()}</td>
+                        <td style="padding: 8px; text-align: center;">${(item['Likes'] || 0).toLocaleString()}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Video Count'] || '-'}</td>
+                        <td style="padding: 8px; font-size: 0.85em;">${tags}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Country'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Period'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center; font-size: 0.85em;">${item['Ranking Date'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item['Category'] || '-'}</td>
+                        <td style="padding: 8px; text-align: center;"><span style="background: #667eea; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.8em;">${rankingTypeKo}</span></td>
+                    `;
+                }
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // 채널 랭킹 이벤트 리스너 등록
+        document.querySelectorAll('input[name="channelRankType"]').forEach(el => {
+            el.addEventListener('change', handleRankTypeChange);
+        });
+        document.querySelectorAll('input[name="channelPeriod"]').forEach(el => {
+            el.addEventListener('change', updateChannelUrlPreview);
+        });
+        document.getElementById('channelCategory').addEventListener('change', updateChannelUrlPreview);
+        document.getElementById('channelCountry').addEventListener('change', updateChannelUrlPreview);
+
+        // ========== 수집 현황 대시보드 함수 ==========
+
+        // 기간 설정 토글
+        document.querySelectorAll('input[name="statusPeriod"]').forEach(el => {
+            el.addEventListener('change', function() {
+                const customRange = document.getElementById('customDateRange');
+                if (this.value === 'custom') {
+                    customRange.style.display = 'block';
+                } else {
+                    customRange.style.display = 'none';
+                }
+            });
+        });
+
+        // 수집 현황 로드
+        async function loadCollectionStatus() {
+            const periodType = document.querySelector('input[name="statusPeriod"]:checked').value;
+            const startDate = document.getElementById('statusStartDate').value;
+            const endDate = document.getElementById('statusEndDate').value;
+
+            let url = `/api/collection_status?period_type=${periodType}`;
+            if (periodType === 'custom' && startDate && endDate) {
+                url += `&start_date=${startDate}&end_date=${endDate}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    renderCollectionStatus(data.collection_status);
+                    renderCollectionSummary(data.summary);
+                    updateDateRangeDisplay(periodType, startDate, endDate);
+                    await loadCollectionHistory(periodType, startDate, endDate);
+                } else {
+                    showMessage('수집 현황 조회 실패: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showMessage('수집 현황 조회 오류: ' + error.message, 'error');
+            }
+        }
+
+        // 기준 날짜 표시 업데이트
+        function updateDateRangeDisplay(periodType, startDate, endDate) {
+            const dateRangeDiv = document.getElementById('statusDateRange');
+            const dateRangeText = document.getElementById('statusDateRangeText');
+            const today = new Date();
+
+            let text = '';
+            if (periodType === 'daily') {
+                text = `${today.toLocaleDateString('ko-KR')} (오늘)`;
+            } else if (periodType === 'weekly') {
+                const weekAgo = new Date(today);
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                text = `${weekAgo.toLocaleDateString('ko-KR')} ~ ${today.toLocaleDateString('ko-KR')} (최근 7일)`;
+            } else if (periodType === 'monthly') {
+                const monthAgo = new Date(today);
+                monthAgo.setDate(monthAgo.getDate() - 30);
+                text = `${monthAgo.toLocaleDateString('ko-KR')} ~ ${today.toLocaleDateString('ko-KR')} (최근 30일)`;
+            } else if (periodType === 'custom' && startDate && endDate) {
+                text = `${startDate} ~ ${endDate}`;
+            }
+
+            dateRangeText.textContent = text;
+            dateRangeDiv.style.display = 'block';
+        }
+
+        // 수집 이력 로드
+        async function loadCollectionHistory(periodType, startDate, endDate) {
+            let url = `/api/collection_history?period_type=${periodType}`;
+            if (periodType === 'custom' && startDate && endDate) {
+                url += `&start_date=${startDate}&end_date=${endDate}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    renderCollectionHistory(data.history);
+                }
+            } catch (error) {
+                console.error('수집 이력 로드 오류:', error);
+            }
+        }
+
+        // 요약 통계 렌더링
+        function renderCollectionSummary(summary) {
+            document.getElementById('summaryTotalCrawls').textContent = summary.total_crawls || 0;
+            document.getElementById('summaryTotalItems').textContent = (summary.total_items || 0).toLocaleString();
+
+            // 타입별 통계
+            const byType = summary.by_type || {};
+            const shortsCount = (byType.shorts?.items || 0) + (byType.video?.items || 0);
+            const channelCount = (byType.channel_popular?.items || 0) + (byType.channel_growth?.items || 0);
+
+            document.getElementById('summaryShorts').textContent = shortsCount.toLocaleString();
+            document.getElementById('summaryChannels').textContent = channelCount.toLocaleString();
+        }
+
+        // 카테고리별 수집 현황 렌더링 (체크박스)
+        function renderCollectionStatus(status) {
+            // 쇼츠/영상 현황
+            const shortsVideoContainer = document.getElementById('shortsVideoStatus');
+            let shortsHtml = '<div style="margin-bottom: 8px; font-weight: bold; grid-column: span 2;">쇼츠</div>';
+
+            for (const [category, collected] of Object.entries(status.shorts || {})) {
+                const checkIcon = collected
+                    ? '<span style="color: #28a745;">✓</span>'
+                    : '<span style="color: #dc3545;">✗</span>';
+                const bgColor = collected ? '#e8f5e9' : '#ffebee';
+                shortsHtml += `
+                    <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: ${bgColor}; border-radius: 4px;">
+                        ${checkIcon} ${category}
+                    </div>
+                `;
+            }
+
+            shortsHtml += '<div style="margin: 8px 0; font-weight: bold; grid-column: span 2; border-top: 1px solid #ddd; padding-top: 8px;">영상</div>';
+
+            for (const [category, collected] of Object.entries(status.video || {})) {
+                const checkIcon = collected
+                    ? '<span style="color: #28a745;">✓</span>'
+                    : '<span style="color: #dc3545;">✗</span>';
+                const bgColor = collected ? '#e8f5e9' : '#ffebee';
+                shortsHtml += `
+                    <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: ${bgColor}; border-radius: 4px;">
+                        ${checkIcon} ${category}
+                    </div>
+                `;
+            }
+
+            shortsVideoContainer.innerHTML = shortsHtml;
+
+            // 채널 현황
+            const channelContainer = document.getElementById('channelStatus');
+            let channelHtml = '<div style="margin-bottom: 8px; font-weight: bold; grid-column: span 2;">인기순위</div>';
+
+            for (const [category, collected] of Object.entries(status.channel_popular || {})) {
+                const checkIcon = collected
+                    ? '<span style="color: #28a745;">✓</span>'
+                    : '<span style="color: #dc3545;">✗</span>';
+                const bgColor = collected ? '#e8f5e9' : '#ffebee';
+                channelHtml += `
+                    <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: ${bgColor}; border-radius: 4px;">
+                        ${checkIcon} ${category}
+                    </div>
+                `;
+            }
+
+            channelHtml += '<div style="margin: 8px 0; font-weight: bold; grid-column: span 2; border-top: 1px solid #ddd; padding-top: 8px;">구독자 급상승</div>';
+
+            for (const [category, collected] of Object.entries(status.channel_growth || {})) {
+                const checkIcon = collected
+                    ? '<span style="color: #28a745;">✓</span>'
+                    : '<span style="color: #dc3545;">✗</span>';
+                const bgColor = collected ? '#e8f5e9' : '#ffebee';
+                channelHtml += `
+                    <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: ${bgColor}; border-radius: 4px;">
+                        ${checkIcon} ${category}
+                    </div>
+                `;
+            }
+
+            channelContainer.innerHTML = channelHtml;
+        }
+
+        // 상세 이력 테이블 렌더링
+        function renderCollectionHistory(history) {
+            const tbody = document.getElementById('collectionHistoryBody');
+
+            if (!history || history.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" style="padding: 20px; text-align: center; color: #666;">
+                            해당 기간에 수집 이력이 없습니다.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            history.forEach(item => {
+                const crawledAt = item.crawled_at ? new Date(item.crawled_at).toLocaleString('ko-KR') : '-';
+                const typeLabel = getTypeLabel(item.target_type);
+                const statusBadge = item.success
+                    ? '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">성공</span>'
+                    : '<span style="background: #dc3545; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">실패</span>';
+
+                html += `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 8px;">${crawledAt}</td>
+                        <td style="padding: 8px; text-align: center;">${typeLabel}</td>
+                        <td style="padding: 8px;">${item.category || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item.country || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item.period || '-'}</td>
+                        <td style="padding: 8px; text-align: center;">${item.item_count || 0}</td>
+                        <td style="padding: 8px; text-align: center;">${statusBadge}</td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        // 타입 라벨 변환
+        function getTypeLabel(targetType) {
+            const labels = {
+                'shorts': '<span style="background: #667eea; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">쇼츠</span>',
+                'video': '<span style="background: #764ba2; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">영상</span>',
+                'channel_popular': '<span style="background: #f5576c; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">채널(인기)</span>',
+                'channel_growth': '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">채널(급상승)</span>'
+            };
+            return labels[targetType] || `<span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8em;">${targetType}</span>`;
+        }
+
+        // ========== 데이터베이스 검색 함수 ==========
+        async function searchDatabase() {
+            const table = document.querySelector('input[name="dbTable"]:checked').value;
+            const keyword = document.getElementById('dbSearchKeyword').value;
+            const category = document.getElementById('dbSearchCategory').value;
+            const country = document.getElementById('dbSearchCountry').value;
+            const limit = document.getElementById('dbSearchLimit').value;
+
+            const params = new URLSearchParams({
+                table: table,
+                keyword: keyword,
+                category: category,
+                country: country,
+                limit: limit
+            });
+
+            try {
+                const response = await fetch(`/api/db_search?${params}`);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    renderDbSearchResults(data.data, table);
+                } else {
+                    showMessage('검색 실패: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showMessage('검색 오류: ' + error.message, 'error');
+            }
+        }
+
+        function renderDbSearchResults(data, table) {
+            const resultsDiv = document.getElementById('dbSearchResults');
+            const countSpan = document.getElementById('dbSearchCount');
+            const tbody = document.getElementById('dbSearchTableBody');
+            const thead = document.getElementById('dbSearchTableHead');
+
+            countSpan.textContent = data.length;
+            resultsDiv.style.display = 'block';
+
+            // 테이블 헤더 변경 (채널 vs 쇼츠/영상)
+            if (table === 'channels') {
+                thead.innerHTML = `
+                    <tr>
+                        <th style="padding: 8px; text-align: center;">순위</th>
+                        <th style="padding: 8px; text-align: left;">채널명</th>
+                        <th style="padding: 8px; text-align: center;">스코어1</th>
+                        <th style="padding: 8px; text-align: center;">스코어2</th>
+                        <th style="padding: 8px; text-align: center;">카테고리</th>
+                        <th style="padding: 8px; text-align: center;">수집일</th>
+                    </tr>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <tr>
+                        <th style="padding: 8px; text-align: center;">순위</th>
+                        <th style="padding: 8px; text-align: left;">제목</th>
+                        <th style="padding: 8px; text-align: center;">조회수</th>
+                        <th style="padding: 8px; text-align: left;">채널명</th>
+                        <th style="padding: 8px; text-align: center;">카테고리</th>
+                        <th style="padding: 8px; text-align: center;">수집일</th>
+                    </tr>
+                `;
+            }
+
+            if (data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #666;">검색 결과가 없습니다.</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            data.forEach(item => {
+                const crawledAt = item.crawled_at ? new Date(item.crawled_at).toLocaleDateString('ko-KR') : '-';
+
+                if (table === 'channels') {
+                    html += `
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 8px; text-align: center;">${item.rank || '-'}</td>
+                            <td style="padding: 8px;">${item.channel_name || '-'}</td>
+                            <td style="padding: 8px; text-align: center;">${(item.score_1 || 0).toLocaleString()}</td>
+                            <td style="padding: 8px; text-align: center;">${(item.score_2 || 0).toLocaleString()}</td>
+                            <td style="padding: 8px; text-align: center;">${item.category || '-'}</td>
+                            <td style="padding: 8px; text-align: center;">${crawledAt}</td>
+                        </tr>
+                    `;
+                } else {
+                    html += `
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 8px; text-align: center;">${item.rank || '-'}</td>
+                            <td style="padding: 8px;">${item.title || '-'}</td>
+                            <td style="padding: 8px; text-align: center;">${(item.views || 0).toLocaleString()}</td>
+                            <td style="padding: 8px;">${item.channel_name || '-'}</td>
+                            <td style="padding: 8px; text-align: center;">${item.category || '-'}</td>
+                            <td style="padding: 8px; text-align: center;">${crawledAt}</td>
+                        </tr>
+                    `;
+                }
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        // ========== 크롤링 완료 팝업 알림 ==========
+        function showCompletionPopup(message, itemCount) {
+            // 알림음 재생 (2중 로직)
+            playNotificationSound();
+
+            // 팝업 요소 생성
+            const popup = document.createElement('div');
+            popup.id = 'completionPopup';
+            popup.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                color: white;
+                padding: 20px 30px;
+                border-radius: 12px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideIn 0.5s ease-out;
+                max-width: 350px;
+            `;
+            popup.innerHTML = `
+                <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 8px;">✅ 크롤링 완료!</div>
+                <div style="font-size: 0.95em;">${message}</div>
+                <div style="font-size: 1.1em; margin-top: 10px; font-weight: bold;">${itemCount}개 항목 수집</div>
+            `;
+
+            // 스타일 추가 (애니메이션)
+            if (!document.getElementById('popupStyles')) {
+                const style = document.createElement('style');
+                style.id = 'popupStyles';
+                style.textContent = `
+                    @keyframes slideIn {
+                        from { transform: translateX(100%); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                    @keyframes slideOut {
+                        from { transform: translateX(0); opacity: 1; }
+                        to { transform: translateX(100%); opacity: 0; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(popup);
+
+            // 5초 후 사라짐
+            setTimeout(() => {
+                popup.style.animation = 'slideOut 0.5s ease-in';
+                setTimeout(() => {
+                    popup.remove();
+                }, 500);
+            }, 5000);
+        }
+
+        // 알림음 재생 (2중 로직 - 첫 번째 실패 시 두 번째 시도)
+        function playNotificationSound() {
+            // 1차 시도: Web Audio API
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = 800;
+                oscillator.type = 'sine';
+                gainNode.gain.value = 0.3;
+
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + 0.3);
+
+                // 두 번째 비프음
+                setTimeout(() => {
+                    const osc2 = audioContext.createOscillator();
+                    const gain2 = audioContext.createGain();
+                    osc2.connect(gain2);
+                    gain2.connect(audioContext.destination);
+                    osc2.frequency.value = 1000;
+                    osc2.type = 'sine';
+                    gain2.gain.value = 0.3;
+                    osc2.start();
+                    osc2.stop(audioContext.currentTime + 0.3);
+                }, 200);
+
+                console.log('Notification sound played (Web Audio API)');
+                return;
+            } catch (e) {
+                console.warn('Web Audio API failed:', e);
+            }
+
+            // 2차 시도: 시스템 비프음 (ASCII bell)
+            try {
+                const bell = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleQAAdxM+pNPP');
+                bell.volume = 0.5;
+                bell.play().catch(() => {
+                    // 최종 fallback: 콘솔 비프
+                    console.log('\u0007');
+                });
+                console.log('Notification sound played (fallback audio)');
+            } catch (e2) {
+                console.warn('All sound methods failed');
+            }
+        }
+
+        // 페이지 로드 시 채널 URL 미리보기 초기화 및 수집 현황 자동 로드
+        window.addEventListener('load', () => {
+            updateChannelUrlPreview();
+            // 페이지 로드 시 오늘 수집 현황 자동 로드
+            loadCollectionStatus();
+        });
+    </script>
+</body>
+</html>
