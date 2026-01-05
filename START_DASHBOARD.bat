@@ -110,6 +110,14 @@ timeout /t 2 /nobreak >nul
 
 echo.
 echo ===================================================
+echo   Cleaning up old logs
+echo ===================================================
+if exist logs\*.log del /q logs\*.log
+if exist logs\*.txt del /q logs\*.txt
+echo [INFO] Old logs deleted.
+
+echo.
+echo ===================================================
 echo   Starting Dashboard Server
 echo ===================================================
 echo [INFO] Port: 5001

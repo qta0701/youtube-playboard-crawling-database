@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube 데이터 대시보드</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
             background: #f6f6f6;
@@ -13,28 +19,69 @@
             min-height: 100vh;
         }
 
+        /* Fallback for broken images */
+        img {
+            position: relative;
+        }
+
+        img::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #e0e0e0;
+            border-radius: inherit;
+        }
+
+        img::after {
+            content: '?';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #999;
+            font-size: 12px;
+        }
+
         /* Header */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #fff;
             padding: 20px 0;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
+
         .header .container {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .header h1 { font-size: 24px; font-weight: 700; }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
         .header-stats {
             display: flex;
             gap: 20px;
         }
+
         .header-stat {
             text-align: center;
         }
-        .header-stat .value { font-size: 20px; font-weight: 700; }
-        .header-stat .label { font-size: 11px; opacity: 0.8; }
+
+        .header-stat .value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .header-stat .label {
+            font-size: 11px;
+            opacity: 0.8;
+        }
 
         /* PLAN Phase 2.1: 컨테이너 너비 확장 */
         .container {
@@ -49,12 +96,20 @@
             border-bottom: 1px solid #e6e6e6;
             padding: 15px 0;
         }
+
         .quota-bar-wrap {
             display: flex;
             align-items: center;
             gap: 20px;
         }
-        .quota-label { font-weight: 600; color: #666; font-size: 13px; min-width: 120px; }
+
+        .quota-label {
+            font-weight: 600;
+            color: #666;
+            font-size: 13px;
+            min-width: 120px;
+        }
+
         .quota-bar {
             flex: 1;
             height: 12px;
@@ -62,25 +117,43 @@
             border-radius: 6px;
             overflow: hidden;
         }
+
         .quota-fill {
             height: 100%;
             border-radius: 6px;
             transition: width 0.5s;
         }
-        .quota-fill.green { background: linear-gradient(90deg, #4caf50, #8bc34a); }
-        .quota-fill.yellow { background: linear-gradient(90deg, #ff9800, #ffc107); }
-        .quota-fill.red { background: linear-gradient(90deg, #f44336, #ff5722); }
-        .quota-value { font-weight: 700; min-width: 180px; text-align: right; font-size: 14px; }
+
+        .quota-fill.green {
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+        }
+
+        .quota-fill.yellow {
+            background: linear-gradient(90deg, #ff9800, #ffc107);
+        }
+
+        .quota-fill.red {
+            background: linear-gradient(90deg, #f44336, #ff5722);
+        }
+
+        .quota-value {
+            font-weight: 700;
+            min-width: 180px;
+            text-align: right;
+            font-size: 14px;
+        }
 
         /* Main Tabs */
         .main-tabs {
             background: #fff;
             border-bottom: 1px solid #e6e6e6;
         }
+
         .tabs-wrap {
             display: flex;
             gap: 0;
         }
+
         .main-tab {
             padding: 15px 30px;
             font-size: 14px;
@@ -92,24 +165,38 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .main-tab:hover { color: #333; background: #f9f9f9; }
+
+        .main-tab:hover {
+            color: #333;
+            background: #f9f9f9;
+        }
+
         .main-tab.active {
             color: #667eea;
             border-bottom-color: #667eea;
         }
 
         /* Content Area */
-        .content { padding: 25px 0; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .content {
+            padding: 25px 0;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
 
         /* Cards */
         .card {
             background: #fff;
             border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
         }
+
         .card-header {
             padding: 15px 20px;
             border-bottom: 1px solid #eee;
@@ -117,8 +204,16 @@
             justify-content: space-between;
             align-items: center;
         }
-        .card-title { font-size: 16px; font-weight: 700; color: #333; }
-        .card-body { padding: 20px; }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
 
         /* Stats Grid */
         .stats-grid {
@@ -127,18 +222,38 @@
             gap: 15px;
             margin-bottom: 25px;
         }
+
         .stat-card {
             background: #fff;
             border-radius: 8px;
             padding: 20px;
             text-align: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
-        .stat-card .icon { font-size: 28px; margin-bottom: 10px; }
-        .stat-card .value { font-size: 28px; font-weight: 700; }
-        .stat-card .label { font-size: 12px; color: #888; margin-top: 5px; }
-        .stat-card.crawl .value { color: #667eea; }
-        .stat-card.api .value { color: #4caf50; }
+
+        .stat-card .icon {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .stat-card.crawl .value {
+            color: #667eea;
+        }
+
+        .stat-card.api .value {
+            color: #4caf50;
+        }
 
         /* Collection Status Grid */
         .collection-grid {
@@ -146,6 +261,7 @@
             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
             gap: 10px;
         }
+
         .collection-item {
             display: flex;
             align-items: center;
@@ -156,7 +272,11 @@
             border-radius: 6px;
             font-size: 13px;
         }
-        .collection-item.collected { background: #e8f5e9; }
+
+        .collection-item.collected {
+            background: #e8f5e9;
+        }
+
         .collection-item .check {
             width: 20px;
             height: 20px;
@@ -167,11 +287,13 @@
             justify-content: center;
             font-size: 12px;
         }
+
         .collection-item.collected .check {
             background: #4caf50;
             border-color: #4caf50;
             color: #fff;
         }
+
         .collection-item .count {
             font-weight: 600;
             color: #667eea;
@@ -188,14 +310,47 @@
             align-items: center;
             transition: all 0.2s;
         }
-        .collection-section-header:hover { opacity: 0.9; transform: translateX(3px); }
-        .collection-section-header.shorts { background: linear-gradient(135deg, #ff5252, #ff8a80); color: #fff; }
-        .collection-section-header.videos { background: linear-gradient(135deg, #2196f3, #64b5f6); color: #fff; }
-        .collection-section-header.channels { background: linear-gradient(135deg, #9c27b0, #ba68c8); color: #fff; }
-        .collection-section-header .title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        .collection-section-header .summary { font-size: 12px; opacity: 0.9; }
-        .collection-section-header .arrow { transition: transform 0.2s; }
-        .collection-section-header.expanded .arrow { transform: rotate(180deg); }
+
+        .collection-section-header:hover {
+            opacity: 0.9;
+            transform: translateX(3px);
+        }
+
+        .collection-section-header.shorts {
+            background: linear-gradient(135deg, #ff5252, #ff8a80);
+            color: #fff;
+        }
+
+        .collection-section-header.videos {
+            background: linear-gradient(135deg, #2196f3, #64b5f6);
+            color: #fff;
+        }
+
+        .collection-section-header.channels {
+            background: linear-gradient(135deg, #9c27b0, #ba68c8);
+            color: #fff;
+        }
+
+        .collection-section-header .title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .collection-section-header .summary {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .collection-section-header .arrow {
+            transition: transform 0.2s;
+        }
+
+        .collection-section-header.expanded .arrow {
+            transform: rotate(180deg);
+        }
 
         /* Collected Data Preview Section */
         .collected-data-section {
@@ -203,10 +358,15 @@
             margin-top: 20px;
             background: #fff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
             overflow: hidden;
         }
-        .collected-data-section.active { display: block; animation: fadeIn 0.3s; }
+
+        .collected-data-section.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
         .collected-data-header {
             padding: 15px 20px;
             background: #f9f9f9;
@@ -215,11 +375,30 @@
             justify-content: space-between;
             align-items: center;
         }
-        .collected-data-header .title { font-weight: 600; }
-        .collected-data-header .close-btn {
-            background: none; border: none; font-size: 20px; cursor: pointer; color: #888;
+
+        .collected-data-header .title {
+            font-weight: 600;
         }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .collected-data-header .close-btn {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #888;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
 
         /* Sortable Table Headers */
         th.sortable {
@@ -228,13 +407,50 @@
             position: relative;
             padding-right: 20px !important;
         }
-        th.sortable:hover { background: #e8e8e8; }
-        th.sortable .sort-icon { position: absolute; right: 5px; opacity: 0.3; font-size: 14px; color: #999; }
-        th.sortable .sort-icon::before { content: '▽'; } /* 기본: 회색 */
-        th.sortable.asc .sort-icon::before { content: ''; }
-        th.sortable.asc .sort-icon::after { content: '▲'; opacity: 1; color: #d63031; font-weight: bold; transform: scale(1.2); } /* 오름차순: 빨강 */
-        th.sortable.desc .sort-icon::before { content: ''; }
-        th.sortable.desc .sort-icon::after { content: '▼'; opacity: 1; color: #0984e3; font-weight: bold; transform: scale(1.2); } /* 내림차순: 파랑 */
+
+        th.sortable:hover {
+            background: #e8e8e8;
+        }
+
+        th.sortable .sort-icon {
+            position: absolute;
+            right: 5px;
+            opacity: 0.3;
+            font-size: 14px;
+            color: #999;
+        }
+
+        th.sortable .sort-icon::before {
+            content: '▽';
+        }
+
+        /* 기본: 회색 */
+        th.sortable.asc .sort-icon::before {
+            content: '';
+        }
+
+        th.sortable.asc .sort-icon::after {
+            content: '▲';
+            opacity: 1;
+            color: #d63031;
+            font-weight: bold;
+            transform: scale(1.2);
+        }
+
+        /* 오름차순: 빨강 */
+        th.sortable.desc .sort-icon::before {
+            content: '';
+        }
+
+        th.sortable.desc .sort-icon::after {
+            content: '▼';
+            opacity: 1;
+            color: #0984e3;
+            font-weight: bold;
+            transform: scale(1.2);
+        }
+
+        /* 내림차순: 파랑 */
 
         /* Thumbnail in table */
         .table-thumb {
@@ -244,7 +460,10 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        .table-thumb:hover { transform: scale(1.1); }
+
+        .table-thumb:hover {
+            transform: scale(1.1);
+        }
 
         /* Data type badge */
         .type-badge {
@@ -254,8 +473,16 @@
             font-size: 10px;
             font-weight: 600;
         }
-        .type-badge.shorts { background: #ff5252; color: #fff; }
-        .type-badge.videos { background: #2196f3; color: #fff; }
+
+        .type-badge.shorts {
+            background: #ff5252;
+            color: #fff;
+        }
+
+        .type-badge.videos {
+            background: #2196f3;
+            color: #fff;
+        }
 
         /* Period/Date Picker Styles */
         input[type="date"] {
@@ -266,7 +493,10 @@
         }
 
         /* Aggregated View Highlight */
-        .aggregated-row { background: linear-gradient(90deg, #fff8e1 0%, #fff 100%); }
+        .aggregated-row {
+            background: linear-gradient(90deg, #fff8e1 0%, #fff 100%);
+        }
+
         .aggregated-rank {
             background: linear-gradient(135deg, #ffc107, #ff9800);
             color: #fff;
@@ -282,33 +512,48 @@
         }
 
         /* Table Styles - PLAN Phase 2.2: 엑셀 스타일 */
-        .table-wrap { overflow-x: auto; }
+        .table-wrap {
+            overflow-x: auto;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
-            table-layout: fixed; /* 컬럼 리사이징 지원 */
+            table-layout: fixed;
+            /* 컬럼 리사이징 지원 */
         }
-        th, td {
+
+        th,
+        td {
             padding: 8px 12px;
             text-align: left;
-            border: 1px solid #dfe2e5; /* 엑셀 스타일 테두리 */
+            border: 1px solid #dfe2e5;
+            /* 엑셀 스타일 테두리 */
             font-size: 13px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
         th {
             background: #f1f3f5;
             font-weight: 600;
             color: #555;
-            font-size: 16px; /* PLAN: +2pt */
-            resize: horizontal; /* 컬럼 너비 조절 */
+            font-size: 16px;
+            /* PLAN: +2pt */
+            resize: horizontal;
+            /* 컬럼 너비 조절 */
             overflow: auto;
         }
+
         td {
-            font-size: 15px !important; /* PLAN Phase 2.2: 폰트 크기 강제 통일 */
+            font-size: 15px !important;
+            /* PLAN Phase 2.2: 폰트 크기 강제 통일 */
         }
-        tr:hover { background: #f8f9fa; }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
 
         /* Buttons */
         .btn {
@@ -323,17 +568,44 @@
             cursor: pointer;
             transition: all 0.2s;
         }
+
         .btn-primary {
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: #fff;
         }
-        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-        .btn-success { background: #4caf50; color: #fff; }
-        .btn-success:hover { background: #43a047; }
-        .btn-secondary { background: #e0e0e0; color: #333; }
-        .btn-secondary:hover { background: #d0d0d0; }
-        .btn-sm { padding: 5px 10px; font-size: 12px; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-success {
+            background: #4caf50;
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background: #43a047;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
         /* Category Filter Buttons (Phase 3.2) */
         .category-btn {
@@ -346,11 +618,13 @@
             transition: all 0.2s ease;
             white-space: nowrap;
         }
+
         .category-btn:hover {
             background: #f5f5f5;
             border-color: #667eea;
             color: #667eea;
         }
+
         .category-btn.active {
             background: #667eea;
             color: white;
@@ -365,16 +639,33 @@
             flex-wrap: wrap;
             align-items: center;
         }
-        .form-group { display: flex; flex-direction: column; gap: 5px; }
-        .form-group label { font-size: 12px; font-weight: 600; color: #666; }
-        select, input[type="text"] {
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+        }
+
+        select,
+        input[type="text"] {
             padding: 8px 12px;
             border: 1px solid #ddd;
             border-radius: 6px;
             font-size: 13px;
             background: #fff;
         }
-        select:focus, input:focus { border-color: #667eea; outline: none; }
+
+        select:focus,
+        input:focus {
+            border-color: #667eea;
+            outline: none;
+        }
 
         /* Sub Tabs */
         .sub-tabs {
@@ -382,6 +673,7 @@
             gap: 8px;
             margin-bottom: 20px;
         }
+
         .sub-tab {
             padding: 8px 16px;
             border: 1px solid #ddd;
@@ -392,7 +684,12 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .sub-tab:hover { border-color: #667eea; color: #667eea; }
+
+        .sub-tab:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
         .sub-tab.active {
             background: #667eea;
             border-color: #667eea;
@@ -405,24 +702,28 @@
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 20px;
         }
+
         .thumb-card {
             background: #fff;
             border-radius: 10px;
             overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
             transition: all 0.3s;
             cursor: pointer;
         }
+
         .thumb-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
         }
+
         .thumb-card img {
             width: 100%;
             aspect-ratio: 16/9;
             object-fit: cover;
             background: #eee;
         }
+
         .thumb-card.channel img {
             width: 100px;
             height: 100px;
@@ -430,7 +731,11 @@
             margin: 20px auto 10px;
             aspect-ratio: 1;
         }
-        .thumb-card .info { padding: 15px; }
+
+        .thumb-card .info {
+            padding: 15px;
+        }
+
         .thumb-card .title {
             font-size: 14px;
             font-weight: 600;
@@ -441,6 +746,7 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+
         .thumb-card .meta {
             display: flex;
             justify-content: space-between;
@@ -448,25 +754,54 @@
             font-size: 12px;
             color: #888;
         }
-        .thumb-card .views { color: #4caf50; font-weight: 600; }
+
+        .thumb-card .views {
+            color: #4caf50;
+            font-weight: 600;
+        }
+
         .thumb-card .badge {
             padding: 3px 8px;
             border-radius: 10px;
             font-size: 11px;
             font-weight: 600;
         }
-        .badge.shorts { background: #ff5252; color: #fff; }
-        .badge.video { background: #2196f3; color: #fff; }
-        .badge.channel { background: #9c27b0; color: #fff; }
-        .thumb-card.channel { text-align: center; }
+
+        .badge.shorts {
+            background: #ff5252;
+            color: #fff;
+        }
+
+        .badge.video {
+            background: #2196f3;
+            color: #fff;
+        }
+
+        .badge.channel {
+            background: #9c27b0;
+            color: #fff;
+        }
+
+        .thumb-card.channel {
+            text-align: center;
+        }
+
         .thumb-card .channel-stats {
             display: flex;
             justify-content: center;
             gap: 20px;
             margin-top: 10px;
         }
-        .thumb-card .channel-stats span { text-align: center; }
-        .thumb-card .channel-stats .num { display: block; font-weight: 700; color: #667eea; }
+
+        .thumb-card .channel-stats span {
+            text-align: center;
+        }
+
+        .thumb-card .channel-stats .num {
+            display: block;
+            font-weight: 700;
+            color: #667eea;
+        }
 
         /* PLAN.md Phase 3: Spreadsheet-style Table */
         .spreadsheet-container {
@@ -561,6 +896,7 @@
             gap: 10px;
             margin-top: 25px;
         }
+
         .pagination button {
             padding: 8px 16px;
             border: 1px solid #ddd;
@@ -568,26 +904,55 @@
             background: #fff;
             cursor: pointer;
         }
-        .pagination button:hover:not(:disabled) { border-color: #667eea; color: #667eea; }
-        .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .pagination .page-info { display: flex; align-items: center; color: #888; font-size: 13px; }
+
+        .pagination button:hover:not(:disabled) {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            display: flex;
+            align-items: center;
+            color: #888;
+            font-size: 13px;
+        }
 
         /* Status Icons */
-        .status-icon { font-size: 16px; }
-        .status-synced { color: #4caf50; }
-        .status-pending { color: #bbb; }
+        .status-icon {
+            font-size: 16px;
+        }
+
+        .status-synced {
+            color: #4caf50;
+        }
+
+        .status-pending {
+            color: #bbb;
+        }
 
         /* Modal */
         .modal {
             display: none;
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.6);
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
             z-index: 1000;
             justify-content: center;
             align-items: center;
         }
-        .modal.active { display: flex; }
+
+        .modal.active {
+            display: flex;
+        }
+
         .modal-content {
             background: #fff;
             border-radius: 12px;
@@ -596,6 +961,7 @@
             max-height: 85vh;
             overflow-y: auto;
         }
+
         .modal-header {
             padding: 20px;
             border-bottom: 1px solid #eee;
@@ -603,7 +969,11 @@
             justify-content: space-between;
             align-items: center;
         }
-        .modal-header h3 { font-size: 18px; }
+
+        .modal-header h3 {
+            font-size: 18px;
+        }
+
         .modal-close {
             background: none;
             border: none;
@@ -611,7 +981,10 @@
             cursor: pointer;
             color: #999;
         }
-        .modal-body { padding: 20px; }
+
+        .modal-body {
+            padding: 20px;
+        }
 
         /* Toast */
         .toast {
@@ -625,25 +998,53 @@
             z-index: 1001;
             animation: slideIn 0.3s;
         }
-        .toast.success { background: #4caf50; }
-        .toast.error { background: #f44336; }
-        .toast.info { background: #2196f3; }
+
+        .toast.success {
+            background: #4caf50;
+        }
+
+        .toast.error {
+            background: #f44336;
+        }
+
+        .toast.info {
+            background: #2196f3;
+        }
+
         @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
 
         /* Loading */
-        .loading { text-align: center; padding: 40px; color: #888; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
         .spinner {
             display: inline-block;
-            width: 32px; height: 32px;
+            width: 32px;
+            height: 32px;
             border: 3px solid #eee;
             border-top-color: #667eea;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
 
         /* Empty State */
         .empty-state {
@@ -651,11 +1052,23 @@
             padding: 60px 20px;
             color: #888;
         }
-        .empty-state .icon { font-size: 48px; margin-bottom: 15px; }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
 
         /* Checkbox Selection */
-        .checkbox-col { width: 40px; text-align: center; }
-        input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .checkbox-col {
+            width: 40px;
+            text-align: center;
+        }
+
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
 
         /* Action Bar */
         .action-bar {
@@ -667,7 +1080,11 @@
             border-radius: 8px;
             margin-bottom: 15px;
         }
-        .action-bar .selected-count { font-weight: 600; color: #667eea; }
+
+        .action-bar .selected-count {
+            font-weight: 600;
+            color: #667eea;
+        }
 
         /* Summary Stats for Collection */
         .summary-row {
@@ -675,19 +1092,22 @@
             gap: 15px;
             margin-bottom: 20px;
         }
+
         .summary-item {
             flex: 1;
             background: #fff;
             padding: 15px;
             border-radius: 8px;
             text-align: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
+
         .summary-item .big-num {
             font-size: 32px;
             font-weight: 700;
             color: #667eea;
         }
+
         .summary-item .desc {
             font-size: 12px;
             color: #888;
@@ -698,7 +1118,9 @@
         th {
             position: relative;
         }
-        .resizer, .resize-handle {
+
+        .resizer,
+        .resize-handle {
             position: absolute;
             right: 0;
             top: 0;
@@ -709,9 +1131,12 @@
             user-select: none;
             z-index: 10;
         }
-        .resizer:hover, .resize-handle:hover {
+
+        .resizer:hover,
+        .resize-handle:hover {
             background: rgba(0, 0, 0, 0.3);
         }
+
         .resizing {
             background: rgba(0, 0, 0, 0.4) !important;
         }
@@ -729,9 +1154,11 @@
             justify-content: center;
             align-items: center;
         }
+
         .export-modal.active {
             display: flex;
         }
+
         .export-modal-content {
             background: #fff;
             border-radius: 12px;
@@ -741,6 +1168,7 @@
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
         }
+
         .export-modal-header {
             display: flex;
             justify-content: space-between;
@@ -751,10 +1179,12 @@
             color: #fff;
             border-radius: 12px 12px 0 0;
         }
+
         .export-modal-header h3 {
             font-size: 18px;
             margin: 0;
         }
+
         .export-modal-close {
             background: none;
             border: none;
@@ -763,9 +1193,11 @@
             cursor: pointer;
             opacity: 0.8;
         }
+
         .export-modal-close:hover {
             opacity: 1;
         }
+
         .export-modal-body {
             padding: 25px;
         }
@@ -779,6 +1211,7 @@
             border-radius: 8px;
             overflow: hidden;
         }
+
         .export-tab {
             flex: 1;
             padding: 12px 20px;
@@ -789,12 +1222,15 @@
             cursor: pointer;
             transition: all 0.2s;
         }
+
         .export-tab:not(:last-child) {
             border-right: 1px solid #ddd;
         }
+
         .export-tab:hover {
             background: #e8e8e8;
         }
+
         .export-tab.active {
             background: #667eea;
             color: #fff;
@@ -804,6 +1240,7 @@
         .export-tab-content {
             display: none;
         }
+
         .export-tab-content.active {
             display: block;
         }
@@ -817,14 +1254,17 @@
             margin-bottom: 20px;
             font-size: 13px;
         }
+
         .export-info-box.warning {
             background: #fff3e0;
             border-left-color: #ff9800;
         }
+
         .export-info-box.danger {
             background: #ffebee;
             border-left-color: #f44336;
         }
+
         .export-info-box strong {
             display: block;
             margin-bottom: 5px;
@@ -834,6 +1274,7 @@
         .export-form-group {
             margin-bottom: 15px;
         }
+
         .export-form-group label {
             display: block;
             font-size: 13px;
@@ -841,6 +1282,7 @@
             color: #555;
             margin-bottom: 6px;
         }
+
         .export-form-group input,
         .export-form-group select {
             width: 100%;
@@ -849,6 +1291,7 @@
             border-radius: 6px;
             font-size: 14px;
         }
+
         .export-form-group input:focus,
         .export-form-group select:focus {
             border-color: #667eea;
@@ -863,12 +1306,14 @@
             padding: 15px;
             margin-bottom: 20px;
         }
+
         .export-quota-row {
             display: flex;
             justify-content: space-between;
             font-size: 13px;
             margin-bottom: 5px;
         }
+
         .export-quota-row.total {
             font-weight: 700;
             font-size: 14px;
@@ -876,6 +1321,7 @@
             border-top: 1px solid #ddd;
             margin-top: 10px;
         }
+
         .export-quota-warning {
             color: #f44336;
             font-weight: 600;
@@ -887,6 +1333,7 @@
             gap: 10px;
             margin-top: 20px;
         }
+
         .export-btn {
             flex: 1;
             padding: 12px 20px;
@@ -901,21 +1348,26 @@
             justify-content: center;
             gap: 8px;
         }
+
         .export-btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #fff;
         }
+
         .export-btn-primary:hover {
             opacity: 0.9;
             transform: translateY(-1px);
         }
+
         .export-btn-secondary {
             background: #e0e0e0;
             color: #333;
         }
+
         .export-btn-secondary:hover {
             background: #d0d0d0;
         }
+
         .export-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -926,6 +1378,7 @@
         .export-url-results {
             margin-top: 20px;
         }
+
         .export-url-item {
             display: flex;
             align-items: center;
@@ -935,6 +1388,7 @@
             border-radius: 6px;
             margin-bottom: 8px;
         }
+
         .export-url-item a {
             flex: 1;
             color: #667eea;
@@ -942,9 +1396,11 @@
             font-size: 13px;
             word-break: break-all;
         }
+
         .export-url-item a:hover {
             text-decoration: underline;
         }
+
         .export-url-item .copy-btn {
             padding: 5px 10px;
             font-size: 12px;
@@ -965,18 +1421,22 @@
             border-radius: 8px;
             margin-bottom: 15px;
         }
+
         .auth-status.connected {
             background: #e8f5e9;
         }
+
         .auth-status .status-icon {
             font-size: 20px;
         }
+
         .auth-status .status-text {
             flex: 1;
             font-size: 13px;
         }
     </style>
 </head>
+
 <body>
     <!-- Header -->
     <header class="header">
@@ -1015,7 +1475,8 @@
                 <button class="main-tab active" data-tab="crawl">크롤링 데이터</button>
                 <button class="main-tab" data-tab="channel-manager">채널 관리</button>
                 <button class="main-tab" data-tab="api">API 데이터</button>
-                <button class="main-tab" data-tab="channel-viewer" id="channelViewerTab" style="display:none;">📺 채널별 영상</button>
+                <button class="main-tab" data-tab="channel-viewer" id="channelViewerTab" style="display:none;">📺 채널별
+                    영상</button>
             </div>
         </div>
     </nav>
@@ -1051,30 +1512,37 @@
 
                         <!-- 날짜 및 기간 필터 -->
                         <div class="form-row" style="margin-bottom:0;">
-                            <select id="collectionPeriodType" onchange="onCollectionPeriodTypeChange()" style="min-width:100px;">
+                            <select id="collectionPeriodType" onchange="onCollectionPeriodTypeChange()"
+                                style="min-width:100px;">
                                 <option value="daily">일간</option>
                                 <option value="weekly">주간</option>
                             </select>
 
                             <!-- 일간 선택 시: 최근 7일 -->
-                            <select id="collectionDailyDate" onchange="filterCollectionByDate()" style="min-width:150px;">
+                            <select id="collectionDailyDate" onchange="filterCollectionByDate()"
+                                style="min-width:150px;">
                                 <option value="">전체 날짜</option>
                             </select>
 
                             <!-- 주간 선택 시: 최근 4주 -->
-                            <select id="collectionWeeklyDate" onchange="filterCollectionByDate()" style="min-width:200px;display:none;">
+                            <select id="collectionWeeklyDate" onchange="filterCollectionByDate()"
+                                style="min-width:200px;display:none;">
                                 <option value="">전체 주간</option>
                             </select>
 
-                            <div style="margin-left:auto;color:#888;font-size:12px;display:flex;align-items:center;" id="collectionFilterInfo">
+                            <div style="margin-left:auto;color:#888;font-size:12px;display:flex;align-items:center;"
+                                id="collectionFilterInfo">
                                 전체 기간
                             </div>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- PLAN Phase 1.2: 여러 날짜의 현황을 가로 스크롤 카드로 표시 -->
-                        <div id="collectionCardsContainer" style="display:flex;gap:15px;overflow-x:auto;padding-bottom:10px;">
-                            <div class="loading"><div class="spinner"></div></div>
+                        <div id="collectionCardsContainer"
+                            style="display:flex;gap:15px;overflow-x:auto;padding-bottom:10px;">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1086,10 +1554,18 @@
                             <span class="card-title">📊 수집 데이터</span>
                             <div style="display:flex;gap:10px;align-items:center;">
                                 <span id="crawlResultCount" style="color:#888;font-size:13px;"></span>
-                                <button class="btn btn-sm btn-secondary" onclick="resetFilters()"><i class="fas fa-undo"></i> 필터 초기화</button>
-                                <button id="btnRemoveDuplicates" class="btn btn-sm btn-warning" onclick="removeDuplicates()"><i class="fas fa-trash-alt"></i> 중복 데이터 제거</button>
-                                <button class="btn btn-sm btn-primary" onclick="exportData()">CSV 내보내기</button>
-                                <button class="btn btn-sm btn-primary" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);" onclick="exportToPlaylist()">&#x1F3AC; 재생목록 내보내기</button>
+                                <button class="btn btn-sm btn-secondary" onclick="resetFilters()"><i
+                                        class="fas fa-undo"></i> 필터 초기화</button>
+                                <button id="btnRemoveDuplicates" class="btn btn-sm btn-warning"
+                                    onclick="removeDuplicates()"><i class="fas fa-trash-alt"></i> 중복 데이터 제거</button>
+                                <button class="btn btn-sm btn-primary" style="background:#4caf50;"
+                                    onclick="exportData('all')">전체 데이터 Excel 내보내기</button>
+                                <button class="btn btn-sm btn-primary" style="background:#2196f3;"
+                                    onclick="exportData('filtered')">필터 데이터 Excel 내보내기</button>
+                                <button class="btn btn-sm btn-secondary" onclick="copyToClipboard()">📋 복사</button>
+                                <button class="btn btn-sm btn-primary"
+                                    style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);"
+                                    onclick="exportToPlaylist()">&#x1F3AC; 재생목록 내보내기</button>
                             </div>
                         </div>
 
@@ -1100,8 +1576,9 @@
                                 <option value="shorts">쇼츠</option>
                                 <option value="channels">채널</option>
                             </select>
-                            <input type="text" id="crawlSearch" placeholder="검색어 (제목, 채널명, 태그)..." style="flex:1; min-width:200px;">
-                            <select id="crawlCategory">
+                            <input type="text" id="crawlSearch" placeholder="검색어 (제목, 채널명, 태그)..."
+                                style="flex:1; min-width:200px;">
+                            <select id="crawlCategory" onchange="currentCategoryFilter=this.value; searchCrawlData()">
                                 <option value="">전체 카테고리</option>
                             </select>
                             <select id="crawlCountry">
@@ -1113,6 +1590,12 @@
                                 <option value="주간">주간</option>
                                 <option value="월간">월간</option>
                             </select>
+                        </div>
+
+                        <!-- NEW: Count Stats Row below Category Section -->
+                        <div id="countStats"
+                            style="display:flex; justify-content:flex-start; gap:15px; font-size:13px; color:#555; margin-bottom:10px; padding:0 5px;">
+                            <!-- Stats injected via JS -->
                         </div>
 
                         <!-- 필터 Row 2: 날짜/기간 필터 -->
@@ -1192,34 +1675,56 @@
                                     조회수 합산 순위 보기
                                 </label>
                                 <!-- [NEW] 컬럼 너비 초기화 버튼 -->
-                                <button class="btn btn-sm btn-secondary" onclick="resetColumnWidths()" title="컬럼 너비를 초기값으로 되돌립니다" style="font-size:11px;padding:4px 8px;">
+                                <button class="btn btn-sm btn-secondary" onclick="resetColumnWidths()"
+                                    title="컬럼 너비를 초기값으로 되돌립니다" style="font-size:11px;padding:4px 8px;">
                                     🔄 너비 초기화
                                 </button>
                                 <!-- [PLAN Phase 2.2] JS 콘솔 로그 다운로드 버튼 -->
                                 <button class="btn btn-sm btn-info" onclick="downloadConsoleLog()"
-                                        title="브라우저 개발자 콘솔의 로그를 파일로 다운로드합니다. 디버깅 정보 포함."
-                                        style="font-size:11px;padding:4px 8px;">
+                                    title="브라우저 개발자 콘솔의 로그를 파일로 다운로드합니다. 디버깅 정보 포함."
+                                    style="font-size:11px;padding:4px 8px;">
                                     📥 로그 다운로드 (JS)
                                 </button>
                             </div>
                         </div>
 
                         <!-- 카테고리 필터 버튼 (Phase 3.2) -->
-                        <div class="form-row" style="margin-top: 10px; padding: 8px; background: #fff; border-radius: 6px; border: 1px solid #e0e0e0;">
-                            <div style="display: flex; align-items: center; gap: 10px; overflow-x: auto; white-space: nowrap;">
-                                <label style="font-size: 12px; color: #666; font-weight: 600; margin-right: 5px;">카테고리:</label>
-                                <button class="btn btn-sm category-btn active" onclick="setCategoryFilter('')" data-category="">전체</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Music')" data-category="Music">음악</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Entertainment')" data-category="Entertainment">엔터테인먼트</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Gaming')" data-category="Gaming">게임</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Sports')" data-category="Sports">스포츠</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Science & Technology')" data-category="Science & Technology">과학/기술</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Film & Animation')" data-category="Film & Animation">영화/애니메이션</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('People & Blogs')" data-category="People & Blogs">인물/블로그</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Comedy')" data-category="Comedy">코미디</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Education')" data-category="Education">교육</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('News & Politics')" data-category="News & Politics">뉴스/정치</button>
-                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Howto & Style')" data-category="Howto & Style">노하우/스타일</button>
+                        <div class="form-row"
+                            style="margin-top: 10px; padding: 8px; background: #fff; border-radius: 6px; border: 1px solid #e0e0e0;">
+                            <div
+                                style="display: flex; align-items: center; gap: 10px; overflow-x: auto; white-space: nowrap;">
+                                <label
+                                    style="font-size: 12px; color: #666; font-weight: 600; margin-right: 5px;">카테고리:</label>
+                                <button class="btn btn-sm category-btn active" onclick="setCategoryFilter('', this)"
+                                    data-category="">전체</button>
+                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Music', this)"
+                                    data-category="Music">음악</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('Entertainment', this)"
+                                    data-category="Entertainment">엔터테인먼트</button>
+                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Gaming', this)"
+                                    data-category="Gaming">게임</button>
+                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Sports', this)"
+                                    data-category="Sports">스포츠</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('Science & Technology', this)"
+                                    data-category="Science & Technology">과학/기술</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('Film & Animation', this)"
+                                    data-category="Film & Animation">영화/애니메이션</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('People & Blogs', this)"
+                                    data-category="People & Blogs">인물/블로그</button>
+                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Comedy', this)"
+                                    data-category="Comedy">코미디</button>
+                                <button class="btn btn-sm category-btn" onclick="setCategoryFilter('Education', this)"
+                                    data-category="Education">교육</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('News & Politics', this)"
+                                    data-category="News & Politics">뉴스/정치</button>
+                                <button class="btn btn-sm category-btn"
+                                    onclick="setCategoryFilter('Howto & Style', this)"
+                                    data-category="Howto & Style">노하우/스타일</button>
                             </div>
                         </div>
                     </div>
@@ -1231,7 +1736,8 @@
                             <div>
                                 <button class="btn btn-secondary btn-sm" onclick="clearSelection()">선택 해제</button>
                                 <button class="btn btn-primary btn-sm" onclick="selectAllVisible()">전체 선택</button>
-                                <button class="btn btn-success btn-sm" id="bulkSyncBtn" onclick="bulkSyncChannels()" disabled>
+                                <button class="btn btn-success btn-sm" id="bulkSyncBtn" onclick="bulkSyncChannels()"
+                                    disabled>
                                     선택 채널 API 동기화 (0)
                                 </button>
                             </div>
@@ -1243,41 +1749,63 @@
                         </div>
 
                         <!-- PLAN.md Phase 1: Spreadsheet Container -->
-                        <div id="crawlResultsTable_container" class="spreadsheet-container" style="max-height: 800px; overflow-y: auto;">
+                        <div id="crawlResultsTable_container" class="spreadsheet-container"
+                            style="max-height: 800px; overflow-y: auto;">
                             <table id="crawlResultsTable" class="spreadsheet-table" style="min-width: 1800px;">
                                 <!-- PLAN Phase 2.1: colgroup으로 컬럼 너비 차등 적용 -->
                                 <colgroup>
-                                    <col style="width: 5%">  <!-- 기간 -->
-                                    <col style="width: 8%">  <!-- 수집일 -->
-                                    <col style="width: 7%">  <!-- 카테고리 -->
-                                    <col style="width: 5%">  <!-- 순위 -->
-                                    <col style="width: 5%">  <!-- 변동 -->
+                                    <col style="width: 5%"> <!-- 기간 -->
+                                    <col style="width: 8%"> <!-- 수집일 -->
+                                    <col style="width: 7%"> <!-- 카테고리 -->
+                                    <col style="width: 5%"> <!-- 순위 -->
+                                    <col style="width: 5%"> <!-- 변동 -->
                                     <col style="width: 18%"> <!-- 제목 (30% → 18% 축소) -->
-                                    <col style="width: 8%">  <!-- 조회수 -->
+                                    <col style="width: 8%"> <!-- 조회수 -->
                                     <col style="width: 15%"> <!-- 채널 (썸네일 포함) -->
-                                    <col style="width: 7%">  <!-- 구독자 -->
-                                    <col style="width: 7%">  <!-- 게시일 -->
+                                    <col style="width: 7%"> <!-- 구독자 -->
+                                    <col style="width: 7%"> <!-- 게시일 -->
                                     <col style="width: 6%" id="colLikes"> <!-- 좋아요 -->
-                                    <col style="width: 5%">  <!-- 국가 -->
+                                    <col style="width: 5%"> <!-- 국가 -->
                                 </colgroup>
                                 <thead id="crawlResultsHead">
                                     <tr>
-                                        <th class="sortable" data-sort="period" onclick="sortByColumn('period')">기간 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="crawled_at" onclick="sortByColumn('crawled_at')">수집일 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="category" onclick="sortByColumn('category')">카테고리 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="rank" onclick="sortByColumn('rank')">순위 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="rank_change" onclick="sortByColumn('rank_change')">변동 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="title" onclick="sortByColumn('title')">제목 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="views" onclick="sortByColumn('views')">조회수 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="channel_name" onclick="sortByColumn('channel_name')">채널 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="subscriber_count" onclick="sortByColumn('subscriber_count')">구독자 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="upload_date" onclick="sortByColumn('upload_date')">게시일 <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="likes" onclick="sortByColumn('likes')" id="thLikes">좋아요 <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="period" onclick="sortByColumn('period')">기간
+                                            <span class="sort-icon"></span>
+                                        </th>
+                                        <th class="sortable" data-sort="crawled_at"
+                                            onclick="sortByColumn('crawled_at')">수집일 <span class="sort-icon"></span>
+                                        </th>
+                                        <th class="sortable" data-sort="category" onclick="sortByColumn('category')">
+                                            카테고리 <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="rank" onclick="sortByColumn('rank')">순위 <span
+                                                class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="rank_change"
+                                            onclick="sortByColumn('rank_change')">변동 <span class="sort-icon"></span>
+                                        </th>
+                                        <th class="sortable" data-sort="title" onclick="sortByColumn('title')">제목 <span
+                                                class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="views" onclick="sortByColumn('views')">조회수 <span
+                                                class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="channel_name"
+                                            onclick="sortByColumn('channel_name')">채널 <span class="sort-icon"></span>
+                                        </th>
+                                        <th class="sortable" data-sort="subscriber_count"
+                                            onclick="sortByColumn('subscriber_count')">구독자 <span
+                                                class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="upload_date"
+                                            onclick="sortByColumn('upload_date')">게시일 <span class="sort-icon"></span>
+                                        </th>
+                                        <th class="sortable" data-sort="likes" onclick="sortByColumn('likes')"
+                                            id="thLikes">좋아요 <span class="sort-icon"></span></th>
                                         <th>국가</th>
                                     </tr>
                                 </thead>
                                 <tbody id="crawlResultsBody">
-                                    <tr><td colspan="12" class="loading"><div class="spinner"></div></td></tr>
+                                    <tr>
+                                        <td colspan="12" class="loading">
+                                            <div class="spinner"></div>
+                                        </td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1301,15 +1829,17 @@
                     <div class="card-body">
                         <!-- 재생목록 입력 그룹 -->
                         <div style="display:flex;gap:10px;margin-bottom:15px;">
-                            <input type="text" id="playlistInput" placeholder="재생목록 URL 또는 ID (예: PLxxxx 또는 https://youtube.com/...&list=PLxxxx)"
-                                   style="flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+                            <input type="text" id="playlistInput"
+                                placeholder="재생목록 URL 또는 ID (예: PLxxxx 또는 https://youtube.com/...&list=PLxxxx)"
+                                style="flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
                             <button class="btn btn-primary" onclick="addPlaylist()" style="white-space:nowrap;">
                                 ➕ 재생목록 추가
                             </button>
                         </div>
 
                         <!-- 등록된 재생목록 카드 그리드 -->
-                        <div id="playlistGrid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:15px;">
+                        <div id="playlistGrid"
+                            style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:15px;">
                             <div class="loading" style="grid-column:1/-1;text-align:center;padding:20px;color:#888;">
                                 등록된 재생목록이 없습니다.
                             </div>
@@ -1320,12 +1850,14 @@
                 <!-- 동기화 현황 카드 -->
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <span style="font-size:14px;color:#666;">📊 동기화 현황</span>
-                    <button class="btn btn-sm" onclick="refreshChannelManagerStats()" id="btnRefreshStats" style="background:#f5f5f5;color:#333;padding:4px 10px;" title="통계 새로고침">
+                    <button class="btn btn-sm" onclick="refreshChannelManagerStats()" id="btnRefreshStats"
+                        style="background:#f5f5f5;color:#333;padding:4px 10px;" title="통계 새로고침">
                         🔄 새로고침
                     </button>
                 </div>
                 <!-- PLAN.md Phase 4: 간소화된 Stats (재생목록 기반 채널 추출만 표시) -->
-                <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+                <!-- PLAN.md Phase 4: 간소화된 Stats (재생목록 기반 채널 추출만 표시) -->
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
                     <div class="stat-card crawl">
                         <div class="value" id="cmTotalChannels">-</div>
                         <div class="label">전체 채널</div>
@@ -1333,6 +1865,22 @@
                     <div class="stat-card api">
                         <div class="value" id="cmSyncedChannels">-</div>
                         <div class="label">추출된 채널</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="cmLowCostReady">-</div>
+                        <div class="label">추출 대기</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="cmUnsyncedChannels">-</div>
+                        <div class="label">미추출 채널</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="cmOutdatedChannels">-</div>
+                        <div class="label">업데이트 필요</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="cmSyncRate">-</div>
+                        <div class="label">동기화율</div>
                     </div>
                 </div>
 
@@ -1343,18 +1891,23 @@
                             <span class="card-title">📋 채널 목록</span>
                             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                                 <!-- PLAN.md 2.2.A: 새로고침 버튼 추가 -->
-                                <button class="btn btn-sm btn-secondary" onclick="refreshChannelManagerList()" id="btnRefreshCMList" title="채널 목록 새로고침" style="background:#2196f3;color:#fff;">
+                                <button class="btn btn-sm btn-secondary" onclick="refreshChannelManagerList()"
+                                    id="btnRefreshCMList" title="채널 목록 새로고침" style="background:#2196f3;color:#fff;">
                                     <i class="fas fa-sync-alt" id="refreshCMIcon"></i> 새로고침
                                 </button>
                                 <span id="cmSelectedCount" style="color:#667eea;font-weight:600;"></span>
                                 <!-- PLAN.md Phase 4: 재생목록 기반 채널 추출 기능만 유지 -->
-                                <button class="btn btn-sm" onclick="extractChannelsFromCrawl()" style="background:#673ab7;color:#fff;" title="크롤링 데이터(shorts_rank, videos_rank, channels_rank)에서 채널 추출">
+                                <button class="btn btn-sm" onclick="extractChannelsFromCrawl()"
+                                    style="background:#673ab7;color:#fff;"
+                                    title="크롤링 데이터(shorts_rank, videos_rank, channels_rank)에서 채널 추출">
                                     📤 크롤링 데이터 채널 추출
                                 </button>
-                                <button class="btn btn-sm" onclick="deleteSelectedChannels()" style="background:#f44336;color:#fff;" title="선택한 채널 삭제">
+                                <button class="btn btn-sm" onclick="deleteSelectedChannels()"
+                                    style="background:#f44336;color:#fff;" title="선택한 채널 삭제">
                                     🗑️ 선택 채널 삭제
                                 </button>
-                                <button class="btn btn-sm" onclick="downloadDebugLogs()" style="background:#607d8b;color:#fff;" title="브라우저 콘솔 디버그 로그 다운로드">
+                                <button class="btn btn-sm" onclick="downloadDebugLogs()"
+                                    style="background:#607d8b;color:#fff;" title="브라우저 콘솔 디버그 로그 다운로드">
                                     📥 JS 로그
                                 </button>
                             </div>
@@ -1363,7 +1916,8 @@
                         <!-- PLAN.md Phase 4: Sync/Recovery UI 제거 완료 -->
 
                         <!-- 카운트 및 페이징 -->
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:8px 12px;background:#f9f9f9;border-radius:6px;">
+                        <div
+                            style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:8px 12px;background:#f9f9f9;border-radius:6px;">
                             <span id="cmResultInfo" style="color:#666;font-size:13px;font-weight:600;">로딩 중...</span>
                             <div class="pagination">
                                 <button id="cmPrev" onclick="loadChannelManagerPage(-1)" disabled>이전</button>
@@ -1399,7 +1953,8 @@
                         </div>
 
                         <!-- PLAN.md Phase 1: Spreadsheet Container -->
-                        <div id="cmTable_container" class="spreadsheet-container" style="max-height: 800px; overflow-y: auto;">
+                        <div id="cmTable_container" class="spreadsheet-container"
+                            style="max-height: 800px; overflow-y: auto;">
                             <table class="spreadsheet-table" id="cmTable" style="min-width:1100px;table-layout:fixed;">
                                 <colgroup id="cmTableColgroup"></colgroup>
                                 <thead>
@@ -1408,7 +1963,8 @@
                                             <input type="checkbox" id="cmSelectAll" onchange="toggleAllChannels(this)">
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:60px;cursor:pointer;position:relative;" data-sort="is_synced" onclick="sortCMTable('is_synced')">
+                                        <th style="width:60px;cursor:pointer;position:relative;" data-sort="is_synced"
+                                            onclick="sortCMTable('is_synced')">
                                             상태<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
@@ -1416,23 +1972,33 @@
                                             썸네일
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:250px;cursor:pointer;position:relative;" data-sort="channel_name" onclick="sortCMTable('channel_name')">
+                                        <th style="width:250px;cursor:pointer;position:relative;"
+                                            data-sort="channel_name" onclick="sortCMTable('channel_name')">
                                             채널<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:110px;cursor:pointer;position:relative;" data-sort="subscriber_count" onclick="sortCMTable('subscriber_count')">
+                                        <th style="width:110px;cursor:pointer;position:relative;"
+                                            data-sort="subscriber_count" onclick="sortCMTable('subscriber_count')">
                                             구독자수<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:200px;cursor:pointer;position:relative;" data-sort="playlist_title" onclick="sortCMTable('playlist_title')">
+                                        <th style="width:200px;cursor:pointer;position:relative;"
+                                            data-sort="playlist_title" onclick="sortCMTable('playlist_title')">
                                             재생목록<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:100px;cursor:pointer;position:relative;" data-sort="last_synced_at" onclick="sortCMTable('last_synced_at')">
+                                        <th style="width:100px;cursor:pointer;position:relative;"
+                                            data-sort="last_synced_at" onclick="sortCMTable('last_synced_at')">
                                             마지막 동기화<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
-                                        <th style="width:60px;cursor:pointer;position:relative;" data-sort="collected_videos" onclick="sortCMTable('collected_videos')">
+                                        <th style="width:100px;cursor:pointer;position:relative;"
+                                            data-sort="last_updated" onclick="sortCMTable('last_updated')">
+                                            추가일<span class="sort-indicator"></span>
+                                            <div class="resize-handle"></div>
+                                        </th>
+                                        <th style="width:60px;cursor:pointer;position:relative;"
+                                            data-sort="collected_videos" onclick="sortCMTable('collected_videos')">
                                             수집영상<span class="sort-indicator"></span>
                                             <div class="resize-handle"></div>
                                         </th>
@@ -1447,7 +2013,13 @@
                                     </tr>
                                 </thead>
                                 <tbody id="cmTableBody">
-                                    <tr><td colspan="10" style="text-align:center;padding:40px;"><div class="loading"><div class="spinner"></div></div></td></tr>
+                                    <tr>
+                                        <td colspan="10" style="text-align:center;padding:40px;">
+                                            <div class="loading">
+                                                <div class="spinner"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1476,13 +2048,17 @@
                 <!-- 검색 & 필터 패널 (PLAN.md - 추가 편의 기능) -->
                 <div style="background:#f5f5f5;padding:15px;margin-bottom:20px;border-radius:8px;">
                     <!-- PLAN.md 2.2: 채널 필터링 섹션 -->
-                    <div id="apiChannelFilterSection" style="display:none;margin-bottom:15px;padding:12px;background:#fff;border-radius:6px;border:2px solid #667eea;">
+                    <div id="apiChannelFilterSection"
+                        style="display:none;margin-bottom:15px;padding:12px;background:#fff;border-radius:6px;border:2px solid #667eea;">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <div style="display:flex;align-items:center;gap:10px;">
                                 <span style="font-size:13px;font-weight:600;color:#667eea;">📺 선택한 채널:</span>
-                                <span id="selectedChannelName" style="font-size:14px;font-weight:700;color:#333;"></span>
+                                <span id="selectedChannelName"
+                                    style="font-size:14px;font-weight:700;color:#333;"></span>
                             </div>
-                            <button onclick="clearChannelFilter()" style="padding:6px 12px;background:#f44336;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✕ 필터 해제</button>
+                            <button onclick="clearChannelFilter()"
+                                style="padding:6px 12px;background:#f44336;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✕
+                                필터 해제</button>
                         </div>
                     </div>
 
@@ -1490,43 +2066,55 @@
                         <!-- 검색 -->
                         <div>
                             <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🔍 검색</label>
-                            <input type="text" id="apiSearchInput" placeholder="제목, 채널명, 태그 검색..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                            <input type="text" id="apiSearchInput" placeholder="제목, 채널명, 태그 검색..."
+                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                         </div>
 
                         <!-- 조회수 범위 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📊 조회수 범위</label>
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📊 조회수
+                                범위</label>
                             <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="number" id="apiViewMin" placeholder="최소" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="number" id="apiViewMin" placeholder="최소"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                                 <span>~</span>
-                                <input type="number" id="apiViewMax" placeholder="최대" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="number" id="apiViewMax" placeholder="최대"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                             </div>
                         </div>
 
                         <!-- 좋아요 비율 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">👍 좋아요 비율 (%)</label>
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">👍 좋아요 비율
+                                (%)</label>
                             <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="number" id="apiLikeRatioMin" placeholder="최소" step="0.1" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="number" id="apiLikeRatioMin" placeholder="최소" step="0.1"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                                 <span>~</span>
-                                <input type="number" id="apiLikeRatioMax" placeholder="최대" step="0.1" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="number" id="apiLikeRatioMax" placeholder="최대" step="0.1"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                             </div>
                         </div>
 
                         <!-- 게시일 범위 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📅 게시일</label>
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📅
+                                게시일</label>
                             <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="date" id="apiDateFrom" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="date" id="apiDateFrom"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                                 <span>~</span>
-                                <input type="date" id="apiDateTo" style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                <input type="date" id="apiDateTo"
+                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
                             </div>
                         </div>
 
                         <!-- 카테고리 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🎯 카테고리</label>
-                            <select id="apiCategoryFilter" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🎯
+                                카테고리</label>
+                            <select id="apiCategoryFilter"
+                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
                                 <option value="">전체</option>
                                 <option value="Music">Music</option>
                                 <option value="Gaming">Gaming</option>
@@ -1544,7 +2132,8 @@
                         <!-- 정렬 -->
                         <div>
                             <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🔀 정렬</label>
-                            <select id="apiSortBy" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+                            <select id="apiSortBy"
+                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
                                 <option value="published_desc">최신순</option>
                                 <option value="published_asc">오래된순</option>
                                 <option value="view_desc">조회수 높은순</option>
@@ -1558,8 +2147,11 @@
 
                     <!-- 버튼 -->
                     <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-                        <button onclick="applyAPIFilters()" style="padding:8px 20px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;">🔍 필터 적용</button>
-                        <button onclick="resetAPIFilters()" style="padding:8px 20px;background:#666;color:white;border:none;border-radius:4px;cursor:pointer;">초기화</button>
+                        <button onclick="applyAPIFilters()"
+                            style="padding:8px 20px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;">🔍
+                            필터 적용</button>
+                        <button onclick="resetAPIFilters()"
+                            style="padding:8px 20px;background:#666;color:white;border:none;border-radius:4px;cursor:pointer;">초기화</button>
                     </div>
                 </div>
 
@@ -1573,17 +2165,50 @@
 
                     <!-- View Mode Toggle (PLAN.md 2.1) -->
                     <div class="view-toggle-group" style="display:flex;gap:8px;">
-                        <button class="btn btn-outline" id="btnTableView" onclick="setApiViewMode('table')" style="padding:6px 12px;border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;">
+                        <button class="btn btn-outline" id="btnTableView" onclick="setApiViewMode('table')"
+                            style="padding:6px 12px;border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;">
                             <i class="fas fa-list"></i> 테이블
                         </button>
-                        <button class="btn btn-outline active" id="btnGridView" onclick="setApiViewMode('grid')" style="padding:6px 12px;border:1px solid #667eea;background:#667eea;color:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;">
+                        <button class="btn btn-outline active" id="btnGridView" onclick="setApiViewMode('grid')"
+                            style="padding:6px 12px;border:1px solid #667eea;background:#667eea;color:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;">
                             <i class="fas fa-th-large"></i> 썸네일
                         </button>
-                        <button class="btn btn-outline" onclick="resetApiSort()" style="padding:6px 12px;border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;" title="정렬 초기화">
+                        <button class="btn btn-outline" onclick="resetApiSort()"
+                            style="padding:6px 12px;border:1px solid #ddd;background:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;"
+                            title="정렬 초기화">
                             <i class="fas fa-undo"></i> 정렬 초기화
                         </button>
-                        <button class="btn btn-outline" onclick="downloadDebugLogs()" style="padding:6px 12px;border:1px solid #607d8b;background:#607d8b;color:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;" title="브라우저 콘솔 디버그 로그 다운로드">
+                        <button class="btn btn-outline" onclick="downloadDebugLogs()"
+                            style="padding:6px 12px;border:1px solid #607d8b;background:#607d8b;color:#fff;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;"
+                            title="브라우저 콘솔 디버그 로그 다운로드">
                             <i class="fas fa-download"></i> JS 로그
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Data Count & Batch Sync Row -->
+                <div id="apiControlRow"
+                    style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:8px 0;">
+                    <!-- Left: Data Counts -->
+                    <div style="display:flex;gap:15px;align-items:center;font-size:13px;color:#555;">
+                        <span>전체: <strong id="apiTotalCount">0</strong>개</span>
+                        <span>현재 표시: <strong id="apiDisplayCount">0</strong>개</span>
+                        <span id="apiSelectedCount" style="color:#667eea;font-weight:600;"></span>
+                    </div>
+
+                    <!-- Right: Batch Sync Controls -->
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="apiBatchSyncLimit"
+                            style="padding:5px 10px;border-radius:4px;border:1px solid #ddd;font-size:12px;">
+                            <option value="0" selected>전체</option>
+                            <option value="50">50개</option>
+                            <option value="100">100개</option>
+                            <option value="150">150개</option>
+                            <option value="200">200개</option>
+                        </select>
+                        <button id="apiBatchSyncBtn" onclick="batchSyncApiChannels()"
+                            style="padding:6px 14px;background:#667eea;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">
+                            🔄 선택 채널 일괄 동기화
                         </button>
                     </div>
                 </div>
@@ -1596,7 +2221,8 @@
                     </div>
 
                     <!-- PLAN.md Phase 1: Spreadsheet Container -->
-                    <div id="apiDataTable_container" class="spreadsheet-container" style="max-height: 800px; overflow-y: auto;">
+                    <div id="apiDataTable_container" class="spreadsheet-container"
+                        style="max-height: 800px; overflow-y: auto;">
                         <table class="spreadsheet-table" id="apiDataTable" style="min-width:1000px;">
                             <thead>
                                 <tr>
@@ -1610,7 +2236,13 @@
                                 </tr>
                             </thead>
                             <tbody id="apiDataTableBody">
-                                <tr><td colspan="7" style="text-align:center;padding:40px;"><div class="loading"><div class="spinner"></div></div></td></tr>
+                                <tr>
+                                    <td colspan="7" style="text-align:center;padding:40px;">
+                                        <div class="loading">
+                                            <div class="spinner"></div>
+                                        </div>
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1619,7 +2251,9 @@
                 <!-- Grid View Container (PLAN.md 2.1) -->
                 <div id="apiGridView" style="display:block;">
                     <div id="apiThumbGrid" class="thumb-grid">
-                        <div class="loading"><div class="spinner"></div></div>
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -1636,7 +2270,7 @@
                 <div id="channelViewerHeader" class="card" style="margin-bottom:20px;">
                     <div class="card-body" style="display:flex;align-items:center;gap:20px;">
                         <img id="cvChannelThumb" src="https://via.placeholder.com/80?text=CH"
-                             style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid #667eea;">
+                            style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid #667eea;">
                         <div style="flex:1;">
                             <h2 id="cvChannelName" style="margin:0 0 8px 0;font-size:20px;color:#333;">채널명</h2>
                             <div style="display:flex;gap:20px;font-size:14px;color:#666;">
@@ -1646,11 +2280,11 @@
                         </div>
                         <div style="display:flex;gap:10px;">
                             <a id="cvYoutubeLink" href="#" target="_blank"
-                               style="padding:10px 20px;background:#ff0000;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;display:flex;align-items:center;gap:8px;">
+                                style="padding:10px 20px;background:#ff0000;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;display:flex;align-items:center;gap:8px;">
                                 <i class="fab fa-youtube"></i> YouTube 채널
                             </a>
                             <button onclick="closeChannelViewer()"
-                                    style="padding:10px 20px;background:#666;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                                style="padding:10px 20px;background:#666;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
                                 ← API 데이터로 돌아가기
                             </button>
                         </div>
@@ -1658,10 +2292,12 @@
                 </div>
 
                 <!-- 필터/정렬 옵션 -->
-                <div style="background:#f5f5f5;padding:15px;margin-bottom:20px;border-radius:8px;display:flex;align-items:center;gap:15px;flex-wrap:wrap;">
+                <div
+                    style="background:#f5f5f5;padding:15px;margin-bottom:20px;border-radius:8px;display:flex;align-items:center;gap:15px;flex-wrap:wrap;">
                     <div>
                         <label style="font-size:13px;font-weight:600;margin-right:8px;">타입:</label>
-                        <select id="cvTypeFilter" onchange="loadChannelViewerVideos()" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
+                        <select id="cvTypeFilter" onchange="loadChannelViewerVideos()"
+                            style="padding:8px;border:1px solid #ddd;border-radius:4px;">
                             <option value="">전체</option>
                             <option value="shorts">쇼츠</option>
                             <option value="video">비디오</option>
@@ -1669,7 +2305,8 @@
                     </div>
                     <div>
                         <label style="font-size:13px;font-weight:600;margin-right:8px;">정렬:</label>
-                        <select id="cvSortBy" onchange="loadChannelViewerVideos()" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
+                        <select id="cvSortBy" onchange="loadChannelViewerVideos()"
+                            style="padding:8px;border:1px solid #ddd;border-radius:4px;">
                             <option value="published_desc">최신순</option>
                             <option value="published_asc">오래된순</option>
                             <option value="views_desc">조회수 높은순</option>
@@ -1680,11 +2317,11 @@
                     <div style="flex:1;"></div>
                     <div style="display:flex;gap:8px;">
                         <button onclick="setCvViewMode('grid')" id="cvBtnGrid"
-                                style="padding:8px 16px;border:1px solid #667eea;background:#667eea;color:#fff;border-radius:4px;cursor:pointer;">
+                            style="padding:8px 16px;border:1px solid #667eea;background:#667eea;color:#fff;border-radius:4px;cursor:pointer;">
                             <i class="fas fa-th-large"></i> 썸네일
                         </button>
                         <button onclick="setCvViewMode('table')" id="cvBtnTable"
-                                style="padding:8px 16px;border:1px solid #ddd;background:#fff;color:#333;border-radius:4px;cursor:pointer;">
+                            style="padding:8px 16px;border:1px solid #ddd;background:#fff;color:#333;border-radius:4px;cursor:pointer;">
                             <i class="fas fa-list"></i> 테이블
                         </button>
                     </div>
@@ -1693,7 +2330,9 @@
                 <!-- 영상 그리드 뷰 -->
                 <div id="cvGridView" style="display:block;">
                     <div id="cvVideoGrid" class="thumb-grid">
-                        <div class="loading"><div class="spinner"></div></div>
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -1737,7 +2376,9 @@
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body" id="channelModalBody">
-                <div class="loading"><div class="spinner"></div></div>
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -1833,6 +2474,7 @@
         // State
         // ============================================================
         let currentTab = 'crawl';
+        let currentCategoryFilter = ''; // [Fix] Global category filter state
         let currentApiSubtype = 'channels';
         let currentCollType = 'shorts';
         let apiPage = 1;
@@ -2702,7 +3344,9 @@
         async function _fetchCrawlData() {
             const type = document.getElementById('crawlDataType').value;
             const keyword = document.getElementById('crawlSearch').value;
-            const category = document.getElementById('crawlCategory').value;
+            // [Fix] Use global state instead of select value which might be missing options
+            const category = currentCategoryFilter;
+            // const category = document.getElementById('crawlCategory').value;
             const country = document.getElementById('crawlCountry').value;
             const period = document.getElementById('crawlPeriod').value;
             const crawlPeriodPreset = document.getElementById('crawlPeriodPreset').value;
@@ -2714,6 +3358,9 @@
 
             currentSortBy = sortBy;
             currentSortOrder = sortOrder;
+
+            // [Debug] Log request parameters
+            console.log(`[Fetch Debug] Type: ${type}, Category: '${category}', GlobalState: '${currentCategoryFilter}'`);
 
             const tbody = document.getElementById('crawlResultsBody');
             tbody.innerHTML = '<tr><td colspan="11" class="loading"><div class="spinner"></div></td></tr>';
@@ -2764,6 +3411,19 @@
                 if (data.status === 'success') {
                     crawlTotalPages = Math.ceil(data.total / pageSize) || 1;
                     updateCrawlPagination();
+
+                    // Update Count Stats Display
+                    const countStats = document.getElementById('countStats');
+                    if (countStats) {
+                        const totalOverall = data.total_overall ? data.total_overall.toLocaleString() : '-';
+                        const totalFiltered = (data.total || data.count).toLocaleString();
+                        countStats.innerHTML = `
+                            <div>전체 데이터: <strong>${totalOverall}</strong>개</div>
+                            <div>필터링된 데이터: <strong style="color: #0d6efd;">${totalFiltered}</strong>개</div>
+                        `;
+                    }
+
+                    // Old header updater (keep if needed or remove if replaced by countStats)
                     document.getElementById('crawlResultCount').textContent = `총 ${(data.total || data.count).toLocaleString()}개`;
                     document.getElementById('crawlPagination').style.display = (data.total || data.count) > pageSize ? 'flex' : 'none';
 
@@ -3181,7 +3841,7 @@
                     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
                     const link = document.createElement('a');
                     link.href = URL.createObjectURL(blob);
-                    link.download = `crawl_data_${type}_${new Date().toISOString().slice(0,10)}.csv`;
+                    link.download = `crawl_data_${type}_${new Date().toISOString().slice(0, 10)}.csv`;
                     link.click();
                     showToast(`${results.length}개 데이터 내보내기 완료`, 'success');
                 } else {
@@ -3375,6 +4035,12 @@
                     apiTotalPages = Math.ceil(data.total / PAGE_SIZE) || 1;
                     updateApiPagination();
 
+                    // Update data count displays
+                    const totalCountEl = document.getElementById('apiTotalCount');
+                    const displayCountEl = document.getElementById('apiDisplayCount');
+                    if (totalCountEl) totalCountEl.textContent = data.total || 0;
+                    if (displayCountEl) displayCountEl.textContent = data.count || 0;
+
                     if (currentApiSubtype === 'channels') {
                         // PLAN.md Phase 2: 채널도 테이블/그리드 뷰 모두 지원
                         if (apiViewMode === 'table') {
@@ -3460,13 +4126,18 @@
 
             // 1. 헤더 변경 (채널 전용 컬럼 + 정렬 기능)
             thead.innerHTML = `
-                <th style="width:60px">#</th>
-                <th class="sortable" data-sort="title" onclick="sortApiColumn('title')" style="width:300px">채널 정보 <span class="sort-icon"></span></th>
-                <th class="sortable" data-sort="subscriber_count" onclick="sortApiColumn('subscriber_count')" style="width:120px">구독자 수 <span class="sort-icon"></span></th>
-                <th class="sortable" data-sort="video_count" onclick="sortApiColumn('video_count')" style="width:100px">영상 수 <span class="sort-icon"></span></th>
-                <th class="sortable" data-sort="view_count" onclick="sortApiColumn('view_count')" style="width:120px">총 조회수 <span class="sort-icon"></span></th>
-                <th style="width:100px">동기화</th>
-                <th style="width:80px">액션</th>
+                <th style="width:30px"><input type="checkbox" id="apiSelectAll" onchange="toggleApiSelectAll(this)"></th>
+                <th style="width:40px">No.</th>
+                <th class="sortable" data-sort="title" onclick="sortApiColumn('title')" style="width:200px">채널명 <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="subscriber_count" onclick="sortApiColumn('subscriber_count')" style="width:100px">구독자 <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="video_count" onclick="sortApiColumn('video_count')" style="width:70px">전체영상 <span class="sort-icon"></span></th>
+                <th style="width:70px">수집영상</th>
+                <th style="width:60px">숏폼</th>
+                <th style="width:60px">롱폼</th>
+                <th class="sortable" data-sort="view_count" onclick="sortApiColumn('view_count')" style="width:100px">총 조회수 <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="last_synced_at" onclick="sortApiColumn('last_synced_at')" style="width:90px">마지막동기화 <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="sync_status" onclick="sortApiColumn('sync_status')" style="width:70px">상태 <span class="sort-icon"></span></th>
+                <th style="width:60px">동기화</th>
             `;
             updateApiSortIndicators();
 
@@ -3475,34 +4146,52 @@
 
             channels.forEach((ch, index) => {
                 const tr = document.createElement('tr');
-                const profileImg = ch.thumbnail_url || 'https://via.placeholder.com/40x40?text=CH';
-                const syncBadge = ch.is_synced
-                    ? '<span class="badge" style="background:#4caf50;color:#fff;">Synced</span>'
-                    : '<span class="badge" style="background:#ff9800;color:#fff;">Unsynced</span>';
+                tr.setAttribute('data-channel-id', ch.channel_id);
+                const profileImg = ch.thumbnail_url || '';
+                const syncStatus = ch.sync_status === 'synced' || ch.is_synced === 1;
+                const syncBadge = syncStatus
+                    ? '<span class="badge" style="background:#4caf50;color:#fff;font-size:10px;">Synced</span>'
+                    : '<span class="badge" style="background:#ff9800;color:#fff;font-size:10px;">Unsynced</span>';
                 const escapedTitle = (ch.title || 'Unknown').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const lastSyncDate = ch.last_synced_at ? formatDate(ch.last_synced_at) : '-';
+
+                // Full number formatting with 명 suffix for subscribers
+                const subCount = ch.subscriber_count ? ch.subscriber_count.toLocaleString() + '명' : '-';
+                const viewCount = ch.view_count ? ch.view_count.toLocaleString() : '-';
+
+                // Video counts
+                const videoCount = ch.video_count || 0;
+                const collectedCount = ch.collected_video_count || 0;
+                const shortsCount = ch.shorts_count || 0;
+                const longformCount = ch.longform_count || 0;
 
                 tr.innerHTML = `
+                    <td style="text-align:center;"><input type="checkbox" class="api-ch-checkbox" value="${ch.channel_id}" onchange="updateApiSelectedCount()"></td>
                     <td style="text-align:center;">${(apiPage - 1) * PAGE_SIZE + index + 1}</td>
                     <td>
-                        <div style="display:flex;align-items:center;gap:10px;">
-                            <img src="${profileImg}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;" onerror="this.src='https://via.placeholder.com/40x40?text=CH'">
-                            <div>
-                                <a href="https://youtube.com/channel/${ch.channel_id}" target="_blank" style="font-weight:bold;color:#333;text-decoration:none;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            ${profileImg ? `<img src="${profileImg}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;background:#e0e0e0;" onerror="this.style.display='none'">` : '<div style="width:36px;height:36px;border-radius:50%;background:#e0e0e0;"></div>'}
+                            <div style="overflow:hidden;">
+                                <a href="https://youtube.com/channel/${ch.channel_id}" target="_blank" style="font-weight:600;color:#333;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:150px;">
                                     ${ch.title || 'Unknown'}
                                 </a>
-                                <div style="font-size:11px;color:#888;">${ch.category || 'N/A'} • ${ch.country || 'N/A'}</div>
+                                <div style="font-size:10px;color:#888;">${ch.channel_id ? ch.channel_id.substring(0, 12) + '...' : 'N/A'}</div>
                             </div>
                         </div>
                     </td>
-                    <td style="text-align:right;">${formatNumber(ch.subscriber_count)}</td>
-                    <td style="text-align:right;">${ch.video_count || 0}개</td>
-                    <td style="text-align:right;">${formatNumber(ch.view_count)}</td>
+                    <td style="text-align:right;font-size:12px;">${subCount}</td>
+                    <td style="text-align:right;font-size:12px;">${videoCount}개</td>
+                    <td style="text-align:right;font-size:12px;">${collectedCount}개</td>
+                    <td style="text-align:right;font-size:12px;color:#f44336;">${shortsCount}개</td>
+                    <td style="text-align:right;font-size:12px;color:#2196f3;">${longformCount}개</td>
+                    <td style="text-align:right;font-size:12px;">${viewCount}</td>
+                    <td style="font-size:10px;">${lastSyncDate}</td>
                     <td style="text-align:center;">${syncBadge}</td>
                     <td style="text-align:center;">
-                        <button onclick="openChannelViewer('${ch.channel_id}', '${escapedTitle}')"
-                                style="padding:4px 8px;background:#667eea;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
-                                title="이 채널의 영상 보기">
-                            📺 보기
+                        <button onclick="syncApiChannel('${ch.channel_id}', this)"
+                                style="padding:3px 6px;background:#667eea;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10px;"
+                                title="채널 정보 및 영상 동기화">
+                            🔄
                         </button>
                     </td>
                 `;
@@ -3512,6 +4201,125 @@
             tbody.innerHTML = '';
             tbody.appendChild(fragment);
             debugLog('SUCCESS', `채널 테이블 렌더링 완료: ${channels.length}개`);
+        }
+
+        // API 채널 전체 선택 토글
+        function toggleApiSelectAll(checkbox) {
+            const checkboxes = document.querySelectorAll('.api-ch-checkbox');
+            checkboxes.forEach(cb => cb.checked = checkbox.checked);
+            updateApiSelectedCount();
+        }
+
+        // API 선택된 채널 수 업데이트
+        function updateApiSelectedCount() {
+            const selected = document.querySelectorAll('.api-ch-checkbox:checked').length;
+            const countEl = document.getElementById('apiSelectedCount');
+            if (countEl) {
+                countEl.textContent = selected > 0 ? `${selected}개 선택` : '';
+            }
+        }
+
+        // API 선택된 채널 일괄 동기화
+        async function batchSyncApiChannels() {
+            const checkboxes = document.querySelectorAll('.api-ch-checkbox:checked');
+            if (checkboxes.length === 0) {
+                showToast('동기화할 채널을 선택해주세요.', 'warning');
+                return;
+            }
+
+            const channelIds = Array.from(checkboxes).map(cb => cb.value);
+            const limitSelect = document.getElementById('apiBatchSyncLimit');
+            const videoLimit = limitSelect ? parseInt(limitSelect.value) : 0;
+            const fetchAll = videoLimit === 0;
+
+            if (!confirm(`${channelIds.length}개 채널을 동기화하시겠습니까?\n(영상 ${fetchAll ? '전체' : videoLimit + '개씩'} 수집)`)) {
+                return;
+            }
+
+            const btn = document.getElementById('apiBatchSyncBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '⏳ 동기화 중...';
+
+            try {
+                const response = await fetch('/api/channel_manager/sync/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channel_ids: channelIds,
+                        fetch_videos: true,
+                        video_limit: fetchAll ? 1000 : videoLimit,
+                        fetch_all: fetchAll,
+                        use_search_fallback: true
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    showToast(`${data.results.success.length}개 채널 동기화 완료!`, 'success');
+                    loadApiData();
+                } else {
+                    showToast(`동기화 실패: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showToast(`동기화 오류: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        // API 데이터 탭에서 개별 채널 동기화 함수
+        async function syncApiChannel(channelId, buttonElement) {
+            if (!channelId) {
+                showToast('채널 ID가 없습니다.', 'error');
+                return;
+            }
+
+            // Get video limit from global selector
+            const selectElement = document.getElementById('apiBatchSyncLimit');
+            const videoLimit = selectElement ? parseInt(selectElement.value) : 0;
+            const fetchAll = videoLimit === 0;
+
+            // Disable button and show loading
+            const originalText = buttonElement.innerHTML;
+            buttonElement.disabled = true;
+            buttonElement.innerHTML = '⏳';
+
+            debugLog('SYNC', `API 채널 동기화 시작: ${channelId}, limit=${videoLimit}, fetchAll=${fetchAll}`);
+
+            try {
+                const response = await fetch('/api/channel_manager/sync/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channel_ids: [channelId],
+                        fetch_videos: true,
+                        video_limit: fetchAll ? 1000 : videoLimit,
+                        fetch_all: fetchAll,
+                        use_search_fallback: true
+                    })
+                });
+
+                const data = await response.json();
+                debugLog('SYNC', `API 채널 동기화 응답`, data);
+
+                if (data.status === 'success') {
+                    const result = data.results;
+                    showToast(`동기화 완료! 영상 ${result.success.length > 0 ? result.success[0].videos_fetched || 0 : 0}개 수집`, 'success');
+
+                    // Reload the API channels list
+                    loadApiData();
+                } else {
+                    showToast(`동기화 실패: ${data.message || '알 수 없는 오류'}`, 'error');
+                }
+            } catch (error) {
+                debugLog('ERROR', `API 채널 동기화 오류: ${error.message}`);
+                showToast(`동기화 오류: ${error.message}`, 'error');
+            } finally {
+                buttonElement.disabled = false;
+                buttonElement.innerHTML = originalText;
+            }
         }
 
         function renderApiVideos(videos) {
@@ -4158,11 +4966,11 @@
 
                 // 중복 데이터 미리보기 메시지
                 const previewMsg = `[중복 데이터 분석 결과]\n\n` +
-                                   `📱 쇼츠: ${r.shorts_rank}건\n` +
-                                   `🎬 비디오: ${r.videos_rank}건\n` +
-                                   `📺 채널: ${r.channels_rank}건\n\n` +
-                                   `총 ${total}건의 중복 데이터가 발견되었습니다.\n\n` +
-                                   `삭제하시겠습니까?\n(가장 최신 수집 데이터만 남기고 과거 중복 데이터는 삭제됩니다.)`;
+                    `📱 쇼츠: ${r.shorts_rank}건\n` +
+                    `🎬 비디오: ${r.videos_rank}건\n` +
+                    `📺 채널: ${r.channels_rank}건\n\n` +
+                    `총 ${total}건의 중복 데이터가 발견되었습니다.\n\n` +
+                    `삭제하시겠습니까?\n(가장 최신 수집 데이터만 남기고 과거 중복 데이터는 삭제됩니다.)`;
 
                 if (!confirm(previewMsg)) {
                     return;
@@ -4186,10 +4994,10 @@
                 // 삭제 완료 메시지
                 const er = execData.results;
                 const resultMsg = `중복 데이터 제거가 완료되었습니다!\n\n` +
-                                  `📱 쇼츠: ${er.shorts_rank}개 삭제\n` +
-                                  `🎬 비디오: ${er.videos_rank}개 삭제\n` +
-                                  `📺 채널: ${er.channels_rank}개 삭제\n\n` +
-                                  `총 ${execData.total}개 정리됨`;
+                    `📱 쇼츠: ${er.shorts_rank}개 삭제\n` +
+                    `🎬 비디오: ${er.videos_rank}개 삭제\n` +
+                    `📺 채널: ${er.channels_rank}개 삭제\n\n` +
+                    `총 ${execData.total}개 정리됨`;
 
                 alert(resultMsg);
 
@@ -4209,15 +5017,26 @@
         }
 
         // 카테고리 필터 버튼 클릭 핸들러 (Phase 3.2)
-        function setCategoryFilter(category) {
-            // 숨겨진 select 요소 값 변경
-            document.getElementById('crawlCategory').value = category;
+        function setCategoryFilter(category, btn) {
+            // [Fix] 전역 상태 업데이트
+            currentCategoryFilter = category;
+
+            // 숨겨진 select 요소 값 변경 (UI 동기화용, 없으면 무시)
+            const catSelect = document.getElementById('crawlCategory');
+            if (catSelect) catSelect.value = category;
 
             // 버튼 active 상태 업데이트
-            document.querySelectorAll('.category-btn').forEach(btn => {
-                btn.classList.remove('active');
+            document.querySelectorAll('.category-btn').forEach(b => {
+                b.classList.remove('active');
             });
-            event.target.classList.add('active');
+
+            // 전달받은 버튼이 있으면 active 추가, 없으면 data-category로 찾기 (안전장치)
+            if (btn) {
+                btn.classList.add('active');
+            } else {
+                const targetBtn = document.querySelector(`.category-btn[data-category="${category}"]`);
+                if (targetBtn) targetBtn.classList.add('active');
+            }
 
             // 검색 트리거
             searchCrawlData();
@@ -4760,11 +5579,11 @@
             // 파일 이름 포맷 (예: JS_CONSOLE_LOG_20251209_153500.txt)
             const now = new Date();
             const timestamp = now.getFullYear() +
-                              String(now.getMonth() + 1).padStart(2, '0') +
-                              String(now.getDate()).padStart(2, '0') + '_' +
-                              String(now.getHours()).padStart(2, '0') +
-                              String(now.getMinutes()).padStart(2, '0') +
-                              String(now.getSeconds()).padStart(2, '0');
+                String(now.getMonth() + 1).padStart(2, '0') +
+                String(now.getDate()).padStart(2, '0') + '_' +
+                String(now.getHours()).padStart(2, '0') +
+                String(now.getMinutes()).padStart(2, '0') +
+                String(now.getSeconds()).padStart(2, '0');
 
             const filename = `JS_CONSOLE_LOG_${timestamp}.txt`;
 
@@ -5279,7 +6098,7 @@
                 };
 
                 // 썸네일 - 크롤링 데이터 탭 형식과 동일하게
-                const thumbUrl = ch.api_thumbnail || ch.thumbnail_url || 'https://via.placeholder.com/30x30?text=N/A';
+                const thumbUrl = ch.api_thumbnail || ch.thumbnail_url || '';
 
                 // 구독자수 - 전체 자리수로 표시
                 const subCount = ch.subscriber_count || ch.api_subscriber_count || 0;
@@ -5301,7 +6120,7 @@
                 // 재생목록 이름
                 const playlistTitle = ch.playlist_title || '-';
                 const playlistBadge = ch.playlist_title
-                    ? `<span class="badge" style="background:#673ab7;color:#fff;font-size:11px;" title="재생목록 ID: ${ch.playlist_source || 'N/A'}">${playlistTitle}</span>`
+                    ? `<span style="font-size:11px;color:#673ab7;" title="재생목록 ID: ${ch.playlist_source || 'N/A'}">${playlistTitle}</span>`
                     : '<span style="color:#999;">-</span>';
 
                 return `
@@ -5320,8 +6139,8 @@
                         </td>
                         <td>${statusBadge}</td>
                         <td style="text-align:center;">
-                            <img src="${thumbUrl}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; cursor:pointer;"
-                                 onerror="this.src='https://via.placeholder.com/40x40?text=N/A'"
+                            <img src="${thumbUrl}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; cursor:pointer; background:#e0e0e0;"
+                                 onerror="this.style.display='none'"
                                  onclick="showChannelDetail('${ch.channel_id || ''}')">
                         </td>
                         <td>
@@ -5337,14 +6156,15 @@
                         <td style="text-align:right;font-size:12px;color:#666;">${subCountDisplay}</td>
                         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${playlistTitle}">${playlistBadge}</td>
                         <td style="font-size:11px;">${lastSyncDate}</td>
+                        <td style="font-size:11px;">${ch.last_updated ? formatDate(ch.last_updated) : '-'}</td>
                         <td style="text-align:center;">${ch.collected_video_count || 0}</td>
                         <td style="font-size:11px;">
                             ${ch.discovery_video_id
-                                ? `<a href="${ch.discovery_video_url || 'https://youtu.be/' + ch.discovery_video_id}" target="_blank" style="color:#1976d2;text-decoration:none;" title="이 영상으로부터 채널 발견">
+                        ? `<a href="${ch.discovery_video_url || 'https://youtu.be/' + ch.discovery_video_id}" target="_blank" style="color:#1976d2;text-decoration:none;" title="이 영상으로부터 채널 발견">
                                     ${ch.discovery_video_id.substring(0, 11)}
                                    </a>`
-                                : '<span style="color:#999;">-</span>'
-                            }
+                        : '<span style="color:#999;">-</span>'
+                    }
                         </td>
                         <td>
                             <button class="btn btn-xs btn-primary" onclick="syncSingleChannel('${identifier}', this)" style="padding:2px 6px;font-size:10px;"
@@ -5674,11 +6494,11 @@
         }
 
         // 사용자 지정 입력 토글
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const select = document.getElementById('syncVideoCount');
             const customInput = document.getElementById('syncVideoCountCustom');
 
-            select.addEventListener('change', function() {
+            select.addEventListener('change', function () {
                 if (this.value === 'custom') {
                     customInput.style.display = 'inline-block';
                     customInput.value = 50;
@@ -5916,7 +6736,7 @@
 
             // Start SSE connection for progress updates
             const eventSource = new EventSource('/api/channel_manager/sync/batch_progress');
-            eventSource.onmessage = function(event) {
+            eventSource.onmessage = function (event) {
                 const progress = JSON.parse(event.data);
 
                 if (progress.status === 'completed') {
@@ -5935,7 +6755,7 @@
                 progressStats.textContent = `성공: ${progress.success_count} | 실패: ${progress.failed_count} | 복구: ${progress.recovered_count}`;
             };
 
-            eventSource.onerror = function(e) {
+            eventSource.onerror = function (e) {
                 debugLog('ERROR', 'SSE 연결 오류', { error: e });
                 eventSource.close();
             };
@@ -6462,7 +7282,7 @@
 
             // 기본 재생목록 제목 설정
             const now = new Date();
-            const defaultTitle = `대시보드 내보내기 ${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            const defaultTitle = `대시보드 내보내기 ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
             document.getElementById('exportPlaylistTitle').value = defaultTitle;
 
             // URL 방식 탭을 기본으로
@@ -6804,6 +7624,12 @@
                 </div>
 
                 <!-- Export Method Tabs -->
+                <div class="col-md-2 d-md-flex justify-content-md-end align-items-center">
+                    <button class="btn btn-primary w-100 mt-2 mt-md-0 ms-2" style="max-width: 100px;"
+                        onclick="searchCrawlData()">
+                        <i class="fas fa-search me-2"></i>조회
+                    </button>
+                </div>
                 <div class="export-tabs">
                     <button class="export-tab active" data-tab="url" onclick="switchExportTab('url')">
                         &#x1F517; 간편 링크 (비용 0)
@@ -6876,5 +7702,115 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // ===================================
+        // NEW: Export & Copy Functions
+        // ===================================
+
+        function exportData(mode) {
+            const type = document.getElementById('crawlDataType').value;
+            const sort_by = currentSortBy || 'crawled_at';
+            const sort_order = currentSortOrder || 'desc';
+
+            // Default to Excel as per user request
+            let url = `/api/export/csv?type=${type}&mode=${mode}&format=excel&sort_by=${sort_by}&sort_order=${sort_order}`;
+
+            if (mode === 'filtered') {
+                const category = currentCategoryFilter;
+                const country = document.getElementById('crawlCountry').value;
+                const period = document.getElementById('crawlPeriod').value;
+                const keyword = document.getElementById('crawlSearch').value;
+                const crawlPeriodPreset = document.getElementById('crawlPeriodPreset').value;
+                const uploadPeriodPreset = document.getElementById('uploadPeriodPreset').value;
+
+                if (category) url += `&category=${encodeURIComponent(category)}`;
+                if (country) url += `&country=${encodeURIComponent(country)}`;
+                if (period) url += `&period=${encodeURIComponent(period)}`;
+                if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+
+                if (crawlPeriodPreset === 'custom') {
+                    const from = document.getElementById('crawlDateFrom').value;
+                    const to = document.getElementById('crawlDateTo').value;
+                    if (from) url += `&crawl_date_from=${from}`;
+                    if (to) url += `&crawl_date_to=${to}`;
+                } else if (crawlPeriodPreset) {
+                    url += `&crawl_period=${crawlPeriodPreset}`;
+                }
+
+                if (uploadPeriodPreset === 'custom') {
+                    const from = document.getElementById('uploadDateFrom').value;
+                    const to = document.getElementById('uploadDateTo').value;
+                    if (from) url += `&upload_date_from=${from}`;
+                    if (to) url += `&upload_date_to=${to}`;
+                } else if (uploadPeriodPreset) {
+                    url += `&upload_period=${uploadPeriodPreset}`;
+                }
+            }
+
+            // Trigger download
+            window.location.href = url;
+        }
+
+        async function copyToClipboard() {
+            const btn = event.target;
+            const originalText = btn ? btn.innerHTML : '📋 복사';
+            if (btn) btn.innerHTML = '⏳ 복사 중...';
+
+            try {
+                const type = document.getElementById('crawlDataType').value;
+                const mode = 'filtered';
+                const sort_by = currentSortBy || 'crawled_at';
+                const sort_order = currentSortOrder || 'desc';
+
+                // Format = TSV for Excel/Sheets copy-paste
+                let url = `/api/export/csv?type=${type}&mode=${mode}&format=tsv&sort_by=${sort_by}&sort_order=${sort_order}`;
+
+                const category = currentCategoryFilter;
+                const country = document.getElementById('crawlCountry').value;
+                const period = document.getElementById('crawlPeriod').value;
+                const keyword = document.getElementById('crawlSearch').value;
+                const crawlPeriodPreset = document.getElementById('crawlPeriodPreset').value;
+                const uploadPeriodPreset = document.getElementById('uploadPeriodPreset').value;
+
+                if (category) url += `&category=${encodeURIComponent(category)}`;
+                if (country) url += `&country=${encodeURIComponent(country)}`;
+                if (period) url += `&period=${encodeURIComponent(period)}`;
+                if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+
+                if (crawlPeriodPreset === 'custom') {
+                    const from = document.getElementById('crawlDateFrom').value;
+                    const to = document.getElementById('crawlDateTo').value;
+                    if (from) url += `&crawl_date_from=${from}`;
+                    if (to) url += `&crawl_date_to=${to}`;
+                } else if (crawlPeriodPreset) {
+                    url += `&crawl_period=${crawlPeriodPreset}`;
+                }
+
+                if (uploadPeriodPreset === 'custom') {
+                    const from = document.getElementById('uploadDateFrom').value;
+                    const to = document.getElementById('uploadDateTo').value;
+                    if (from) url += `&upload_date_from=${from}`;
+                    if (to) url += `&upload_date_to=${to}`;
+                } else if (uploadPeriodPreset) {
+                    url += `&upload_period=${uploadPeriodPreset}`;
+                }
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Export failed');
+                const text = await res.text();
+
+                await navigator.clipboard.writeText(text);
+                showToast('📋 엑셀 형식으로 복사되었습니다!', 'success');
+
+            } catch (e) {
+                console.error('Clipboard copy failed:', e);
+                showToast('복사 실패: ' + e.message, 'error');
+            } finally {
+                if (btn) btn.innerHTML = originalText;
+            }
+        }
+    </script>
 </body>
+
 </html>

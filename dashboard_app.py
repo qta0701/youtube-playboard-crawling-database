@@ -9,6 +9,9 @@ import sys
 import sqlite3
 import random
 from datetime import datetime
+import csv
+import io
+import pandas as pd
 
 # [LOGGING FIX] 순서 중요: 로거 설정 모듈에서 함수만 먼저 가져옴
 from logger_config import set_log_prefix
@@ -432,7 +435,9 @@ def api_channels_list():
             'subscriber_count': 'ac.subscriber_count',
             'video_count': 'ac.video_count',
             'view_count': 'ac.view_count',
-            'last_updated': 'ac.last_updated'
+            'last_updated': 'ac.last_updated',
+            'sync_status': 'ac.sync_status',
+            'last_synced_at': 'ac.last_synced_at'
         }
 
         sort_column = allowed_sort_columns.get(sort_by, 'ac.last_updated')
@@ -451,10 +456,16 @@ def api_channels_list():
                 ac.video_count,
                 ac.uploads_playlist_id,
                 ac.last_updated,
+                ac.sync_status,
+                ac.last_synced_at,
+                ac.collected_video_count,
+                CASE WHEN ac.sync_status = 'synced' THEN 1 ELSE 0 END as is_synced,
                 cr.category,
                 cr.ranking_type,
                 cr.subscriber_count as score_1,
-                cr.country
+                cr.country,
+                (SELECT COUNT(*) FROM api_videos av WHERE av.channel_id = ac.channel_id AND av.duration_sec <= 60) as shorts_count,
+                (SELECT COUNT(*) FROM api_videos av WHERE av.channel_id = ac.channel_id AND (av.duration_sec > 60 OR av.duration_sec IS NULL)) as longform_count
             FROM api_channels ac
             LEFT JOIN channels_rank cr ON ac.channel_id = cr.channel_id
             ORDER BY {sort_column} {sort_order}
@@ -1107,8 +1118,37 @@ def api_crawl_data():
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))
 
-        # [PLAN Phase 4.1] 요청 파라미터 디버그 로깅
-        logger.debug(f"API Request: /api/crawl_data - Type: {data_type}, Category: {category}, Keyword: '{keyword}', Limit: {limit}, Offset: {offset}")
+        # [PLAN Phase 4.1] Request Parameter Logging
+        logger.info(f"API Request: /api/crawl_data - Type: {data_type}, Category: '{category}', Keyword: '{keyword}', Limit: {limit}, Offset: {offset}")
+
+        # [Fix] Frontend sends English categories, but DB stores Korean. Map them.
+        CATEGORY_MAP = {
+            'Music': '음악',
+            'Entertainment': '엔터테인먼트',
+            'Gaming': '게임',
+            'Science & Technology': '과학기술',
+            'People & Blogs': '인물/블로그',
+            'News & Politics': '뉴스/정치',
+            'Sports': '스포츠',
+            'Education': '교육',
+            'Pets & Animals': '동물',
+            'Film & Animation': '영화/애니메이션',
+            'Comedy': '코메디',
+            'Howto & Style': '노하우/스타일',
+            'Travel & Events': '여행/이벤트',
+            'Autos & Vehicles': '자동차/교통',
+            'Nonprofits & Activism': '비영리/사회운동',
+            # Add reverse mapping just in case
+            '음악': '음악',
+            '엔터테인먼트': '엔터테인먼트',
+            '게임': '게임'
+        }
+        
+        # Translate category if present in map
+        if category in CATEGORY_MAP:
+            original_category = category
+            category = CATEGORY_MAP[category]
+            logger.info(f"Category mapped: '{original_category}' -> '{category}'")
 
         # 정렬 옵션
         sort_by = request.args.get('sort_by', 'crawled_at')  # 정렬 기준
@@ -1295,11 +1335,19 @@ def api_crawl_data():
         if sort_by in valid_sort_columns:
             sort_dir = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
             query += f" ORDER BY {sort_by} {sort_dir}"
+            
+            # [Modified] 수집일 기준 정렬 시 순위(rank)를 2차 정렬 기준으로 추가 (최신 날짜 + 높은 순위 우선)
+            if sort_by == 'crawled_at':
+                query += ", rank ASC"
         else:
-            query += " ORDER BY crawled_at DESC"
+            query += " ORDER BY crawled_at DESC, rank ASC"
 
         query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
+
+        # [Debug] Log final query and params
+        # logger.debug(f"Executing Query: {query}")
+        logger.info(f"Query Params: {params}")
 
         cursor.execute(query, params)
         results = [dict(row) for row in cursor.fetchall()]
@@ -1382,10 +1430,28 @@ def api_crawl_data():
                 count_params.append(crawl_date_to)
             count_query += ") as count"
 
+
         # [Fix] Double Fetch 오류 수정: fetchone() 결과를 변수에 할당
         cursor.execute(count_query, count_params)
         result_row = cursor.fetchone()
         total = result_row['count'] if result_row else 0
+        
+        # 전체 데이터 개수 (필터링 전) 조회 - UI 표시용
+        total_overall = 0
+        try:
+            if data_type == 'all':
+                cursor.execute("SELECT (SELECT COUNT(*) FROM shorts_rank) + (SELECT COUNT(*) FROM videos_rank)")
+            elif data_type == 'shorts':
+                cursor.execute("SELECT COUNT(*) FROM shorts_rank")
+            elif data_type == 'videos':
+                cursor.execute("SELECT COUNT(*) FROM videos_rank")
+            else:
+                cursor.execute("SELECT COUNT(*) FROM channels_rank")
+            
+            row = cursor.fetchone()
+            total_overall = row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Failed to get total_overall count: {e}")
 
         conn.close()
 
@@ -1393,7 +1459,7 @@ def api_crawl_data():
         if len(results) > 0:
             # 첫 번째 행 샘플 로그 (썸네일 URL 확인용)
             sample = results[0]
-            logger.info(f"API Success: /api/crawl_data - Data type: {data_type}, Count: {len(results)}/{total}")
+            logger.info(f"API Success: /api/crawl_data - Data type: {data_type}, Filtered: {total}, Total: {total_overall}")
             logger.debug(f"[Sample Row] video_id={sample.get('video_id')}, thumbnail_url={sample.get('thumbnail_url')}, "
                         f"channel_name={sample.get('channel_name')}, channel_profile_url={sample.get('channel_profile_url')}")
         else:
@@ -1404,6 +1470,7 @@ def api_crawl_data():
             'type': data_type,
             'count': len(results),
             'total': total,
+            'total_overall': total_overall,
             'results': results,
             'sort_by': sort_by,
             'sort_order': sort_order
@@ -2025,6 +2092,7 @@ def api_playlists_add():
 
         # YouTube API로 메타데이터 조회
         from modules.youtube_manager import YouTubeManager
+        logger.info(f"Fetching metadata for playlist ID: {playlist_id}")
         yt = YouTubeManager(DB_PATH)
 
         metadata = yt.fetch_playlist_metadata(playlist_id)
@@ -2193,6 +2261,7 @@ def api_channel_manager_list():
         # ===== 개선 #41: 재생목록 기반 채널 목록 =====
         # PLAN.md Phase 2: '동기화' → '추출 완료' 개념 재정의
         # api_channels에서 crawled_url='playlist'인 채널만 조회
+        # LEFT JOIN with monitored_playlists to get playlist title
         main_query = """
             SELECT
                 ac.channel_id,
@@ -2203,13 +2272,23 @@ def api_channel_manager_list():
                 ac.last_synced_at,
                 ac.sync_status,
                 ac.collected_video_count,
+                ac.playlist_source,
+                mp.title as playlist_title,
+                ac.discovery_video_id,
+                ac.discovery_video_url,
+                ac.last_updated,
+                CASE
+                    WHEN ac.sync_status = 'synced' THEN 1 ELSE 0
+                END as is_synced,
                 CASE
                     WHEN (ac.channel_id IS NOT NULL AND ac.channel_id != 'N/A')
                          OR ac.last_synced_at IS NOT NULL
                     THEN 1 ELSE 0
                 END as is_extracted,
+                CASE WHEN ac.last_synced_at IS NULL THEN 1 ELSE 0 END as sync_null_flag,
                 CAST(COALESCE(JulianDay('now') - JulianDay(ac.last_synced_at), 9999) AS INTEGER) as days_since_sync
             FROM api_channels ac
+            LEFT JOIN monitored_playlists mp ON ac.playlist_source = mp.playlist_id
             WHERE ac.crawled_url = 'playlist'
         """
 
@@ -2221,14 +2300,20 @@ def api_channel_manager_list():
         elif sync_status == 'unsynced':
             main_query += " AND (ac.sync_status IS NULL OR ac.sync_status != 'synced')"
 
-        # 정렬
+        # 정렬 (NULLS LAST 효과를 위해 sync_null_flag 사용)
         sort_map = {
             'channel_name': 'ac.title',
             'subscriber_count': 'COALESCE(ac.subscriber_count, 0)',
-            'last_synced_at': 'COALESCE(ac.last_synced_at, "")'
+            'last_synced_at': 'sync_null_flag ASC, ac.last_synced_at',
+            'days_since_sync': 'sync_null_flag ASC, days_since_sync',
+            'last_updated': 'ac.last_updated'
         }
-        sort_column = sort_map.get(sort_by, 'COALESCE(ac.last_synced_at, "")')
-        main_query += f" ORDER BY {sort_column} {sort_order.upper()}"
+        sort_column = sort_map.get(sort_by, 'sync_null_flag ASC, ac.last_synced_at')
+        # For last_synced_at, we want DESC (newest first), but sync_null_flag should be ASC (nulls last)
+        if sort_by in ['last_synced_at', 'days_since_sync']:
+            main_query += f" ORDER BY {sort_column} {sort_order.upper()}"
+        else:
+            main_query += f" ORDER BY {sort_column} {sort_order.upper()}"
 
         # 페이지네이션
         main_query += " LIMIT ? OFFSET ?"
@@ -2940,9 +3025,9 @@ def api_extract_channels_from_crawl():
                 'title': channel_name,
                 'subscriber_count': parse_subscriber_count(ch['subscriber_count']),
                 'subscriber_count_raw': ch['subscriber_count'],  # 원본 문자열도 저장
-                'category': ch.get('category') or '',
-                'country': ch.get('country') or '',
-                'thumbnail_url': thumbnail_url or ch.get('thumbnail_url') or '',
+                'category': ch['category'] if 'category' in ch.keys() else '',
+                'country': ch['country'] if 'country' in ch.keys() else '',
+                'thumbnail_url': thumbnail_url or (ch['thumbnail_url'] if 'thumbnail_url' in ch.keys() else '') or '',
                 'source': source_type
             }
 
@@ -2961,7 +3046,7 @@ def api_extract_channels_from_crawl():
         for channel_name, ch_data in all_channels.items():
             # 기존 채널 체크 (title로 - channel_id는 NULL일 수 있음)
             cursor.execute('''
-                SELECT id, title FROM api_channels
+                SELECT channel_id, title FROM api_channels
                 WHERE title = ?
             ''', (channel_name,))
             existing = cursor.fetchone()
@@ -3521,6 +3606,258 @@ def api_export_quota_estimate():
 # 메인 실행
 # ============================================================
 
+
+@app.route('/api/export/csv')
+def api_export_csv():
+    """데이터 내보내기 API (CSV/Excel/TSV)"""
+    try:
+        data_type = request.args.get('type', 'videos')  # videos, shorts, channels, all
+        export_mode = request.args.get('mode', 'filtered')  # filtered, all
+        file_format = request.args.get('format', 'csv') # csv, excel, tsv
+        
+        # 필터 파라미터 (export_mode가 'filtered'일 때만 사용)
+        category = request.args.get('category')
+        country = request.args.get('country')
+        period = request.args.get('period')
+        keyword = request.args.get('keyword')
+        
+        # 날짜 필터
+        crawl_date = request.args.get('crawl_date')
+        crawl_period = request.args.get('crawl_period')
+        crawl_date_from = request.args.get('crawl_date_from')
+        crawl_date_to = request.args.get('crawl_date_to')
+        
+        upload_period = request.args.get('upload_period')
+        upload_date_from = request.args.get('upload_date_from')
+        upload_date_to = request.args.get('upload_date_to')
+
+        # 정렬 (기본값: 수집일 최신순 + 순위 높은순)
+        sort_by = request.args.get('sort_by', 'crawled_at')
+        sort_order = request.args.get('sort_order', 'desc')
+
+        # 영어 카테고리 -> 한국어 카테고리 매핑
+        CATEGORY_MAP = {
+            'Music': '음악',
+            'Entertainment': '엔터테인먼트',
+            'Gaming': '게임',
+            'Sports': '스포츠',
+            'Science & Technology': '과학기술',
+            'Film & Animation': '영화/애니메이션',
+            'People & Blogs': '인물/블로그',
+            'Comedy': '코미디',
+            'Education': '교육',
+            'News & Politics': '뉴스/정치',
+            'Howto & Style': '노하우/스타일'
+        }
+
+        if category and category in CATEGORY_MAP:
+             category = CATEGORY_MAP[category]
+
+        # 쿼리 생성
+        conn = get_db_connection()
+        
+        # pandas read_sql_query 사용을 위해 params 준비
+        query = ""
+        params = []
+
+        # 'all' 모드면 필터 무시
+        if export_mode == 'all':
+            category = None
+            country = None
+            period = None
+            keyword = None
+            crawl_date = None
+            crawl_period = None
+            crawl_date_from = None
+            crawl_date_to = None
+            upload_period = None
+            upload_date_from = None
+            upload_date_to = None
+
+        if data_type == 'channels':
+            query = """
+                SELECT 'channels' as data_type, channel_name, subscriber_count, total_views, 
+                       rank, rank_change, category, country, period, received_views,
+                       crawled_at, channel_url
+                FROM channels_rank 
+                WHERE 1=1
+            """
+        elif data_type == 'videos':
+             query = """
+                SELECT 'videos' as data_type, title, channel_name, views, rank, rank_change,
+                       upload_date, subscriber_count, category, country, period,
+                       crawled_at, video_id
+                FROM videos_rank 
+                WHERE 1=1
+            """
+        elif data_type == 'shorts':
+             query = """
+                SELECT 'shorts' as data_type, title, channel_name, views, rank, rank_change,
+                       upload_date, subscriber_count, category, country, period,
+                       crawled_at, video_id
+                FROM shorts_rank 
+                WHERE 1=1
+            """
+        else: # all
+             query = """
+                SELECT 'shorts' as data_type, title, channel_name, views, rank, rank_change,
+                       upload_date, subscriber_count, category, country, period,
+                       crawled_at, video_id
+                FROM shorts_rank 
+                WHERE 1=1
+             """
+
+        # Apply Filters
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        if country:
+            query += " AND country = ?"
+            params.append(country)
+        if period:
+            query += " AND period = ?"
+            params.append(period)
+        if keyword:
+            if data_type == 'channels':
+                query += " AND channel_name LIKE ?"
+                params.append(f'%{keyword}%')
+            else:
+                query += " AND (title LIKE ? OR channel_name LIKE ?)"
+                params.extend([f'%{keyword}%', f'%{keyword}%'])
+        
+        # Date Filters
+        if crawl_date:
+            query += " AND DATE(crawled_at) = ?"
+            params.append(crawl_date)
+        elif crawl_period:
+            period_days = {'1d': 1, '3d': 3, '7d': 7, '14d': 14, '1m': 30, '3m': 90, '6m': 180, '1y': 365}
+            if crawl_period in period_days:
+                query += f" AND crawled_at >= datetime('now', '-{period_days[crawl_period]} days')"
+        elif crawl_date_from:
+            query += " AND DATE(crawled_at) >= ?"
+            params.append(crawl_date_from)
+            if crawl_date_to:
+                 query += " AND DATE(crawled_at) <= ?"
+                 params.append(crawl_date_to)
+
+        if data_type != 'channels':
+            if upload_period:
+                period_days = {'1d': 1, '3d': 3, '7d': 7, '14d': 14, '1m': 30, '3m': 90, '6m': 180, '1y': 365}
+                if upload_period in period_days:
+                    query += f" AND upload_date >= date('now', '-{period_days[upload_period]} days')"
+            elif upload_date_from:
+                query += " AND upload_date >= ?"
+                params.append(upload_date_from)
+                if upload_date_to:
+                    query += " AND upload_date <= ?"
+                    params.append(upload_date_to)
+
+        # UNION for 'all'
+        if data_type == 'all':
+            query += """
+                UNION ALL
+                SELECT 'videos' as data_type, title, channel_name, views, rank, rank_change,
+                       upload_date, subscriber_count, category, country, period,
+                       crawled_at, video_id
+                FROM videos_rank 
+                WHERE 1=1
+            """
+            if category:
+                query += " AND category = ?"
+                params.append(category)
+            if country:
+                query += " AND country = ?"
+                params.append(country)
+            if period:
+                query += " AND period = ?"
+                params.append(period)
+            if keyword:
+                query += " AND (title LIKE ? OR channel_name LIKE ?)"
+                params.extend([f'%{keyword}%', f'%{keyword}%'])
+            if crawl_date:
+                query += " AND DATE(crawled_at) = ?"
+                params.append(crawl_date)
+            elif crawl_period:
+                period_days = {'1d': 1, '3d': 3, '7d': 7, '14d': 14, '1m': 30, '3m': 90, '6m': 180, '1y': 365}
+                if crawl_period in period_days:
+                    query += f" AND crawled_at >= datetime('now', '-{period_days[crawl_period]} days')"
+            elif crawl_date_from:
+                query += " AND DATE(crawled_at) >= ?"
+                params.append(crawl_date_from)
+                if crawl_date_to:
+                     query += " AND DATE(crawled_at) <= ?"
+                     params.append(crawl_date_to)
+            if upload_period:
+                period_days = {'1d': 1, '3d': 3, '7d': 7, '14d': 14, '1m': 30, '3m': 90, '6m': 180, '1y': 365}
+                if upload_period in period_days:
+                    query += f" AND upload_date >= date('now', '-{period_days[upload_period]} days')"
+            elif upload_date_from:
+                query += " AND upload_date >= ?"
+                params.append(upload_date_from)
+                if upload_date_to:
+                    query += " AND upload_date <= ?"
+                    params.append(upload_date_to)
+
+        # Sorting
+        valid_sort_columns = ['views', 'rank', 'crawled_at', 'upload_date', 'channel_name', 'title', 'subscriber_count']
+        if sort_by in valid_sort_columns:
+            sort_dir = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
+            query += f" ORDER BY {sort_by} {sort_dir}"
+            if sort_by == 'crawled_at':
+                query += ", rank ASC"
+        else:
+            query += " ORDER BY crawled_at DESC, rank ASC"
+
+        query += " LIMIT 50000" 
+
+        # pandas로 데이터 로드
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        if file_format == 'excel':
+            output = io.BytesIO()
+            filename = f"youtube_data_{export_mode}_{data_type}_{timestamp}.xlsx"
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+            
+            output.seek(0)
+            return Response(
+                output,
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-disposition": f"attachment; filename={filename}"}
+            )
+            
+        elif file_format == 'tsv':
+            # TSV: Tab Separated (for cell-based copy)
+            output = io.StringIO()
+            # pandas to_csv with sep='\t'
+            df.to_csv(output, sep='\t', index=False)
+            result = output.getvalue()
+            
+            # 클립보드 복사용은 text/plain으로 반환하면 JS에서 text()로 읽기 편함
+            return Response(result, mimetype="text/plain; charset=utf-8")
+            
+        else:
+            # CSV (default)
+            output = io.StringIO()
+            filename = f"youtube_data_{export_mode}_{data_type}_{timestamp}.csv"
+            # BOM for Excel compatibility with Korean
+            output.write('\ufeff')
+            df.to_csv(output, index=False)
+            
+            return Response(
+                output.getvalue(),
+                mimetype="text/csv",
+                headers={"Content-disposition": f"attachment; filename={filename}"}
+            )
+
+    except Exception as e:
+        logger.error(f"[Export Data] Error: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 if __name__ == '__main__':
     # 필요한 디렉토리 생성
     os.makedirs('output/db', exist_ok=True)
@@ -3538,3 +3875,5 @@ if __name__ == '__main__':
     print("=" * 60 + "\n")
 
     app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
+
+

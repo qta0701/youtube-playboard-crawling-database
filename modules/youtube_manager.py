@@ -38,8 +38,8 @@ class YouTubeManager:
         self.quota_tracker = QuotaTracker(db_path)
         self.youtube = None
 
-        # API 초기화 시도
-        self._init_youtube_api()
+        # API 초기화는 필요할 때 수행 (Lazy Loading)
+        # self._init_youtube_api()
 
     def _init_youtube_api(self):
         """YouTube API 클라이언트 초기화"""
@@ -87,6 +87,9 @@ class YouTubeManager:
             'error': None
         }
 
+        if not self.youtube:
+            self._init_youtube_api()
+        
         if not self.youtube:
             result['error'] = 'YouTube API not initialized'
             return result
@@ -203,6 +206,9 @@ class YouTubeManager:
             'quota_used': 0,
             'error': None
         }
+
+        if not self.youtube:
+            self._init_youtube_api()
 
         if not self.youtube:
             result['error'] = 'YouTube API not initialized'
@@ -366,6 +372,9 @@ class YouTubeManager:
         # 2. API 사용 가능 여부 확인
         logger.debug("Checking API availability...")
         if not self.youtube:
+            self._init_youtube_api()
+
+        if not self.youtube:
             result['error'] = 'YouTube API not initialized'
             logger.error(f"✗ CHANNEL SYNC FAILED: {result['error']}")
             return result
@@ -439,29 +448,73 @@ class YouTubeManager:
         return result
 
     def _save_channel(self, data: dict):
-        """채널 데이터 DB 저장"""
+        """채널 데이터 DB 저장 (기존 playlist_source, crawled_url 보존)"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
-            cursor.execute('''
-                INSERT OR REPLACE INTO api_channels (
-                    channel_id, title, thumbnail_url,
-                    subscriber_count, view_count, video_count,
-                    uploads_playlist_id, crawled_url, last_updated
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                data['channel_id'],
-                data['title'],
-                data['thumbnail_url'],
-                data['subscriber_count'],
-                data['view_count'],
-                data['video_count'],
-                data['uploads_playlist_id'],
-                data['crawled_url'],
-                datetime.now().isoformat()
-            ))
+            # First check if the channel exists and has crawled_url='playlist'
+            cursor.execute('SELECT crawled_url, playlist_source FROM api_channels WHERE channel_id = ?', (data['channel_id'],))
+            existing = cursor.fetchone()
+            
+            # Preserve crawled_url='playlist' and playlist_source if they exist
+            if existing and existing['crawled_url'] == 'playlist':
+                # Update existing playlist channel - preserve crawled_url and playlist_source
+                cursor.execute('''
+                    UPDATE api_channels SET
+                        title = ?,
+                        thumbnail_url = ?,
+                        subscriber_count = ?,
+                        view_count = ?,
+                        video_count = ?,
+                        uploads_playlist_id = ?,
+                        last_updated = ?,
+                        last_synced_at = ?,
+                        sync_status = 'synced'
+                    WHERE channel_id = ?
+                ''', (
+                    data['title'],
+                    data['thumbnail_url'],
+                    data['subscriber_count'],
+                    data['view_count'],
+                    data['video_count'],
+                    data['uploads_playlist_id'],
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat(),
+                    data['channel_id']
+                ))
+            else:
+                # New channel - insert with full data
+                cursor.execute('''
+                    INSERT INTO api_channels (
+                        channel_id, title, thumbnail_url,
+                        subscriber_count, view_count, video_count,
+                        uploads_playlist_id, crawled_url, last_updated,
+                        last_synced_at, sync_status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+                    ON CONFLICT(channel_id) DO UPDATE SET
+                        title = excluded.title,
+                        thumbnail_url = excluded.thumbnail_url,
+                        subscriber_count = excluded.subscriber_count,
+                        view_count = excluded.view_count,
+                        video_count = excluded.video_count,
+                        uploads_playlist_id = excluded.uploads_playlist_id,
+                        last_updated = excluded.last_updated,
+                        last_synced_at = excluded.last_synced_at,
+                        sync_status = 'synced'
+                ''', (
+                    data['channel_id'],
+                    data['title'],
+                    data['thumbnail_url'],
+                    data['subscriber_count'],
+                    data['view_count'],
+                    data['video_count'],
+                    data['uploads_playlist_id'],
+                    data['crawled_url'],
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                ))
             conn.commit()
             logger.debug(f"Channel saved: {data['channel_id']}")
         except Exception as e:
@@ -831,6 +884,9 @@ class YouTubeManager:
         }
 
         if not self.youtube:
+            self._init_youtube_api()
+
+        if not self.youtube:
             result['error'] = 'YouTube API not initialized'
             return result
 
@@ -911,6 +967,9 @@ class YouTubeManager:
             'quota_used': 0,
             'error': None
         }
+
+        if not self.youtube:
+            self._init_youtube_api()
 
         if not self.youtube:
             result['error'] = 'YouTube API not initialized'
