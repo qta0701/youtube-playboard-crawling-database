@@ -2046,75 +2046,131 @@
                 </div>
 
                 <!-- 검색 & 필터 패널 (PLAN.md - 추가 편의 기능) -->
-                <div style="background:#f5f5f5;padding:15px;margin-bottom:20px;border-radius:8px;">
+                <div id="apiFilterPanel" style="background:#f5f5f5;padding:18px;margin-bottom:20px;border-radius:8px;"
+                    onkeydown="if(event.key==='Enter'){applyAPIFilters();}">
                     <!-- PLAN.md 2.2: 채널 필터링 섹션 -->
                     <div id="apiChannelFilterSection"
                         style="display:none;margin-bottom:15px;padding:12px;background:#fff;border-radius:6px;border:2px solid #667eea;">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <div style="display:flex;align-items:center;gap:10px;">
-                                <span style="font-size:13px;font-weight:600;color:#667eea;">📺 선택한 채널:</span>
+                                <span style="font-size:14px;font-weight:600;color:#667eea;">📺 선택한 채널:</span>
                                 <span id="selectedChannelName"
-                                    style="font-size:14px;font-weight:700;color:#333;"></span>
+                                    style="font-size:15px;font-weight:700;color:#333;"></span>
                             </div>
                             <button onclick="clearChannelFilter()"
-                                style="padding:6px 12px;background:#f44336;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✕
+                                style="padding:8px 16px;background:#f44336;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;">✕
                                 필터 해제</button>
                         </div>
                     </div>
 
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;align-items:end;">
+                    <!-- Row 1: 검색, 조회수, 구독자수 -->
+                    <div
+                        style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;align-items:end;margin-bottom:15px;">
                         <!-- 검색 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🔍 검색</label>
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">🔍 검색</label>
                             <input type="text" id="apiSearchInput" placeholder="제목, 채널명, 태그 검색..."
-                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                                style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;" />
                         </div>
 
-                        <!-- 조회수 범위 -->
+                        <!-- 조회수 필터 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📊 조회수
-                                범위</label>
-                            <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="number" id="apiViewMin" placeholder="최소"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
-                                <span>~</span>
-                                <input type="number" id="apiViewMax" placeholder="최대"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">📊
+                                조회수</label>
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <input type="number" id="apiViewValue" placeholder="숫자 입력"
+                                    style="flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;" />
+                                <select id="apiViewUnit"
+                                    style="padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="1">1</option>
+                                    <option value="1000">1천</option>
+                                    <option value="10000" selected>1만</option>
+                                    <option value="100000">10만</option>
+                                    <option value="1000000">100만</option>
+                                    <option value="10000000">1000만</option>
+                                </select>
+                                <select id="apiViewOp"
+                                    style="padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="gte">이상</option>
+                                    <option value="lte">이하</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 구독자수 필터 -->
+                        <div>
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">👥
+                                구독자수</label>
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <input type="number" id="apiSubValue" placeholder="숫자 입력"
+                                    style="flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;" />
+                                <select id="apiSubUnit"
+                                    style="padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="1">1</option>
+                                    <option value="1000">1천</option>
+                                    <option value="10000" selected>1만</option>
+                                    <option value="100000">10만</option>
+                                    <option value="1000000">100만</option>
+                                    <option value="10000000">1000만</option>
+                                </select>
+                                <select id="apiSubOp"
+                                    style="padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="gte">이상</option>
+                                    <option value="lte">이하</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Row 2: 게시일, 좋아요 비율, 카테고리, 국가 -->
+                    <div
+                        style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:15px;align-items:end;margin-bottom:15px;">
+                        <!-- 게시일 범위 -->
+                        <div>
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">📅
+                                게시일</label>
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <select id="apiDatePreset" onchange="onApiDatePresetChange()"
+                                    style="flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="">전체</option>
+                                    <option value="3d">3일 이내</option>
+                                    <option value="7d">1주일 이내</option>
+                                    <option value="14d">2주일 이내</option>
+                                    <option value="1m">1달 이내</option>
+                                    <option value="3m">3달 이내</option>
+                                    <option value="6m">6개월 이내</option>
+                                    <option value="1y">1년 이내</option>
+                                    <option value="custom">직접 입력</option>
+                                </select>
+                                <input type="date" id="apiDateFrom"
+                                    style="display:none;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;" />
+                                <span id="apiDateSep" style="display:none;">~</span>
+                                <input type="date" id="apiDateTo"
+                                    style="display:none;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;" />
                             </div>
                         </div>
 
                         <!-- 좋아요 비율 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">👍 좋아요 비율
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">👍 좋아요비율
                                 (%)</label>
-                            <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="number" id="apiLikeRatioMin" placeholder="최소" step="0.1"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
-                                <span>~</span>
-                                <input type="number" id="apiLikeRatioMax" placeholder="최대" step="0.1"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
-                            </div>
-                        </div>
-
-                        <!-- 게시일 범위 -->
-                        <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">📅
-                                게시일</label>
-                            <div style="display:flex;gap:5px;align-items:center;">
-                                <input type="date" id="apiDateFrom"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
-                                <span>~</span>
-                                <input type="date" id="apiDateTo"
-                                    style="width:45%;padding:8px;border:1px solid #ddd;border-radius:4px;" />
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <input type="number" id="apiLikeRatioValue" placeholder="숫자" step="0.1"
+                                    style="flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;" />
+                                <select id="apiLikeRatioOp"
+                                    style="padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                    <option value="gte">이상</option>
+                                    <option value="lte">이하</option>
+                                </select>
                             </div>
                         </div>
 
                         <!-- 카테고리 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🎯
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">🎯
                                 카테고리</label>
                             <select id="apiCategoryFilter"
-                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+                                style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
                                 <option value="">전체</option>
                                 <option value="Music">Music</option>
                                 <option value="Gaming">Gaming</option>
@@ -2129,29 +2185,54 @@
                             </select>
                         </div>
 
-                        <!-- 정렬 -->
+                        <!-- 국가 -->
                         <div>
-                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">🔀 정렬</label>
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">🌍 국가</label>
+                            <select id="apiCountryFilter"
+                                style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                                <option value="">전체</option>
+                                <option value="KR">한국</option>
+                                <option value="US">미국</option>
+                                <option value="JP">일본</option>
+                                <option value="CN">중국</option>
+                                <option value="TW">대만</option>
+                                <option value="VN">베트남</option>
+                                <option value="TH">태국</option>
+                                <option value="ID">인도네시아</option>
+                                <option value="GB">영국</option>
+                                <option value="DE">독일</option>
+                                <option value="FR">프랑스</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Row 3: 정렬 + 버튼 -->
+                    <div style="display:flex;gap:15px;align-items:end;justify-content:space-between;">
+                        <!-- 정렬 -->
+                        <div style="flex:1;max-width:250px;">
+                            <label style="display:block;margin-bottom:6px;font-size:14px;font-weight:600;">🔀 정렬</label>
                             <select id="apiSortBy"
-                                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+                                style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
                                 <option value="published_desc">최신순</option>
                                 <option value="published_asc">오래된순</option>
                                 <option value="view_desc">조회수 높은순</option>
                                 <option value="view_asc">조회수 낮은순</option>
+                                <option value="subscriber_desc">구독자 높은순</option>
+                                <option value="subscriber_asc">구독자 낮은순</option>
                                 <option value="like_ratio_desc">좋아요 비율 높은순</option>
                                 <option value="like_ratio_asc">좋아요 비율 낮은순</option>
                                 <option value="daily_view_desc">일평균 조회수 높은순</option>
                             </select>
                         </div>
-                    </div>
 
-                    <!-- 버튼 -->
-                    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-                        <button onclick="applyAPIFilters()"
-                            style="padding:8px 20px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;">🔍
-                            필터 적용</button>
-                        <button onclick="resetAPIFilters()"
-                            style="padding:8px 20px;background:#666;color:white;border:none;border-radius:4px;cursor:pointer;">초기화</button>
+                        <!-- 버튼 -->
+                        <div style="display:flex;gap:10px;">
+                            <button onclick="applyAPIFilters()"
+                                style="padding:12px 28px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:14px;">🔍
+                                필터 적용</button>
+                            <button onclick="resetAPIFilters()"
+                                style="padding:12px 28px;background:#666;color:white;border:none;border-radius:4px;cursor:pointer;font-size:14px;">초기화</button>
+                        </div>
                     </div>
                 </div>
 
@@ -2194,6 +2275,25 @@
                         <span>전체: <strong id="apiTotalCount">0</strong>개</span>
                         <span>현재 표시: <strong id="apiDisplayCount">0</strong>개</span>
                         <span id="apiSelectedCount" style="color:#667eea;font-weight:600;"></span>
+                    </div>
+
+                    <!-- Center: Download & Copy Buttons -->
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <button onclick="downloadApiDataExcel('all')"
+                            style="padding:5px 10px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            title="전체 데이터 엑셀 다운로드">
+                            📥 전체 다운로드
+                        </button>
+                        <button onclick="downloadApiDataExcel('filtered')"
+                            style="padding:5px 10px;background:#2196f3;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            title="현재 표시된 데이터만 엑셀 다운로드">
+                            📥 필터 다운로드
+                        </button>
+                        <button onclick="copyApiTableToClipboard()"
+                            style="padding:5px 10px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            title="테이블 데이터 클립보드 복사">
+                            📋 테이블 복사
+                        </button>
                     </div>
 
                     <!-- Right: Batch Sync Controls -->
@@ -2481,7 +2581,7 @@
         let apiTotalPages = 1;
         let crawlPage = 1;
         let crawlTotalPages = 1;
-        const PAGE_SIZE = 20;
+        const PAGE_SIZE = 200;
         let selectedChannels = new Set();
         let collectionData = { shorts: [], videos: [], channels: [] };
         let categoriesList = [];
@@ -4319,6 +4419,159 @@
             } finally {
                 buttonElement.disabled = false;
                 buttonElement.innerHTML = originalText;
+            }
+        }
+
+        // API 데이터 엑셀 다운로드 함수
+        async function downloadApiDataExcel(mode) {
+            const subtype = currentApiSubtype; // 'channels', 'shorts', 'videos'
+            const isAll = mode === 'all';
+
+            showToast(`${isAll ? '전체' : '필터링된'} ${subtype} 데이터를 준비 중...`, 'info');
+
+            try {
+                let data = [];
+
+                if (isAll) {
+                    // Fetch all data without pagination
+                    const endpoint = subtype === 'channels'
+                        ? `/api/channels/api?limit=10000&offset=0`
+                        : `/api/videos/list?type=${subtype}&limit=10000&offset=0`;
+
+                    const response = await fetch(endpoint);
+                    const result = await response.json();
+
+                    if (result.status === 'success') {
+                        data = subtype === 'channels' ? result.channels : result.videos;
+                    }
+                } else {
+                    // Use current page data
+                    const endpoint = subtype === 'channels'
+                        ? `/api/channels/api?limit=${PAGE_SIZE}&offset=${(apiPage - 1) * PAGE_SIZE}`
+                        : `/api/videos/list?type=${subtype}&limit=${PAGE_SIZE}&offset=${(apiPage - 1) * PAGE_SIZE}`;
+
+                    const response = await fetch(endpoint);
+                    const result = await response.json();
+
+                    if (result.status === 'success') {
+                        data = subtype === 'channels' ? result.channels : result.videos;
+                    }
+                }
+
+                if (data.length === 0) {
+                    showToast('다운로드할 데이터가 없습니다.', 'warning');
+                    return;
+                }
+
+                // Convert to CSV format (Excel compatible)
+                let csvContent = '';
+
+                if (subtype === 'channels') {
+                    // Channels headers
+                    csvContent = '\uFEFF채널명,구독자수,전체영상,수집영상,숏폼,롱폼,총조회수,마지막동기화,상태,채널ID\n';
+                    data.forEach(ch => {
+                        const row = [
+                            `"${(ch.title || '').replace(/"/g, '""')}"`,
+                            ch.subscriber_count || 0,
+                            ch.video_count || 0,
+                            ch.collected_video_count || 0,
+                            ch.shorts_count || 0,
+                            ch.longform_count || 0,
+                            ch.view_count || 0,
+                            ch.last_synced_at || '',
+                            ch.sync_status || 'unsynced',
+                            ch.channel_id || ''
+                        ].join(',');
+                        csvContent += row + '\n';
+                    });
+                } else {
+                    // Videos/Shorts headers
+                    csvContent = '\uFEFF제목,채널명,조회수,좋아요,업로드일,타입,영상ID\n';
+                    data.forEach(v => {
+                        const row = [
+                            `"${(v.title || '').replace(/"/g, '""')}"`,
+                            `"${(v.channel_name || '').replace(/"/g, '""')}"`,
+                            v.view_count || 0,
+                            v.like_count || 0,
+                            v.published_at || '',
+                            v.video_type || 'video',
+                            v.video_id || ''
+                        ].join(',');
+                        csvContent += row + '\n';
+                    });
+                }
+
+                // Create and download file
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                const timestamp = new Date().toISOString().slice(0, 10);
+                link.href = url;
+                link.download = `${subtype}_${mode}_${timestamp}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                showToast(`${data.length}개 ${subtype} 데이터 다운로드 완료!`, 'success');
+
+            } catch (error) {
+                console.error('Download error:', error);
+                showToast(`다운로드 오류: ${error.message}`, 'error');
+            }
+        }
+
+        // API 테이블 클립보드 복사 함수
+        function copyApiTableToClipboard() {
+            const table = document.getElementById('apiDataTable');
+            if (!table) {
+                showToast('복사할 테이블이 없습니다.', 'warning');
+                return;
+            }
+
+            const rows = table.querySelectorAll('tr');
+            if (rows.length === 0) {
+                showToast('복사할 데이터가 없습니다.', 'warning');
+                return;
+            }
+
+            let textContent = '';
+
+            rows.forEach((row, index) => {
+                const cells = row.querySelectorAll('th, td');
+                const rowData = [];
+
+                cells.forEach((cell, cellIndex) => {
+                    // Skip checkbox column (first column)
+                    if (cellIndex === 0 && (cell.querySelector('input[type="checkbox"]') || cell.textContent.trim() === '')) {
+                        return;
+                    }
+
+                    // Get text content, clean up
+                    let text = cell.textContent.trim().replace(/\s+/g, ' ');
+
+                    // Handle cells with buttons (skip those)
+                    if (cell.querySelector('button')) {
+                        text = '';
+                    }
+
+                    rowData.push(text);
+                });
+
+                if (rowData.length > 0) {
+                    textContent += rowData.join('\t') + '\n';
+                }
+            });
+
+            if (textContent) {
+                navigator.clipboard.writeText(textContent).then(() => {
+                    showToast(`테이블 데이터가 클립보드에 복사되었습니다!`, 'success');
+                }).catch(err => {
+                    console.error('Clipboard error:', err);
+                    showToast('클립보드 복사 실패', 'error');
+                });
+            } else {
+                showToast('복사할 내용이 없습니다.', 'warning');
             }
         }
 
