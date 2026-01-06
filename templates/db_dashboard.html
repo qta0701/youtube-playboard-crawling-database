@@ -5277,29 +5277,40 @@
                                     </div>
                                 </div>
                                 <!-- 내보내기 버튼 그룹 -->
-                                <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
-                                    <div style="display:flex;gap:6px;">
+                                <div style="display:flex;flex-direction:column;gap:8px;flex-shrink:0;background:#f8f9fa;padding:12px;border-radius:8px;">
+                                    <div style="font-size:13px;font-weight:700;color:#333;margin-bottom:4px;">📤 내보내기</div>
+                                    <!-- 데이터 소스 선택 -->
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                                        <span style="font-size:12px;color:#666;">데이터:</span>
+                                        <select id="chExportSource" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                                            <option value="list" selected>영상 목록 기준</option>
+                                            <option value="db">DB 전체 데이터</option>
+                                        </select>
+                                    </div>
+                                    <!-- 선택 내보내기 -->
+                                    <div style="display:flex;gap:8px;">
                                         <button onclick="downloadChannelVideos('selected')" 
-                                                style="padding:6px 10px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;">
-                                            📥 선택 다운로드
+                                                style="padding:8px 14px;background:#4caf50;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;">
+                                            📥 선택 Excel
                                         </button>
                                         <button onclick="copyChannelVideos('selected')" 
-                                                style="padding:6px 10px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;">
+                                                style="padding:8px 14px;background:#ff9800;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;">
                                             📋 선택 복사
                                         </button>
                                     </div>
-                                    <div style="display:flex;gap:6px;align-items:center;">
-                                        <span style="font-size:11px;color:#666;">상위</span>
+                                    <!-- 상위 N개 내보내기 -->
+                                    <div style="display:flex;gap:8px;align-items:center;">
+                                        <span style="font-size:13px;color:#333;font-weight:600;">상위</span>
                                         <input type="number" id="chTopNInput" value="10" min="1" max="100" 
-                                               style="width:50px;padding:4px;border:1px solid #ddd;border-radius:4px;font-size:11px;text-align:center;">
-                                        <span style="font-size:11px;color:#666;">개</span>
+                                               style="width:55px;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px;text-align:center;">
+                                        <span style="font-size:13px;color:#333;">개</span>
                                         <button onclick="downloadChannelVideos('topN')" 
-                                                style="padding:6px 8px;background:#2196f3;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">
-                                            📥
+                                                style="padding:8px 12px;background:#2196f3;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;">
+                                            📥 Excel
                                         </button>
                                         <button onclick="copyChannelVideos('topN')" 
-                                                style="padding:6px 8px;background:#607d8b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">
-                                            📋
+                                                style="padding:8px 12px;background:#607d8b;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;">
+                                            📋 복사
                                         </button>
                                     </div>
                                 </div>
@@ -5378,6 +5389,7 @@
                     window.channelVideosData = videos;
                     window.channelVideosSortBy = 'latest';
                     window.channelVideosFilter = 'all';
+                    window.currentChannelData = ch; // 내보내기용 채널 데이터 저장
 
                     showModal('📺 채널 상세 정보', content);
                 } else {
@@ -5566,7 +5578,7 @@
             return videos;
         }
 
-        // 채널 영상 엑셀 다운로드
+        // 채널 영상 Excel 다운로드
         function downloadChannelVideos(mode) {
             const videos = getChannelVideosForExport(mode);
             if (videos.length === 0) {
@@ -5574,28 +5586,54 @@
                 return;
             }
 
-            // TSV 형식으로 생성
-            const headers = ['No.', '제목', '영상 유형', '조회수', '길이(초)', '업로드일', 'Video ID', 'URL'];
-            const rows = videos.map((v, i) => [
-                i + 1,
-                v.title || '',
-                v.video_type === 'shorts' ? '쇼츠' : '비디오',
-                v.view_count || 0,
-                v.duration_sec || '',
-                v.published_at || '',
-                v.video_id,
-                `https://youtube.com/watch?v=${v.video_id}`
-            ].join('\t'));
+            const source = document.getElementById('chExportSource')?.value || 'list';
+            const channelData = window.currentChannelData || {};
 
+            let headers, rows;
+
+            if (source === 'list') {
+                // 영상 목록 기준 (채널 정보 포함)
+                headers = ['No.', '영상ID', '제목', '영상유형', '카테고리', '채널명', '구독자수', '조회수', '길이(초)', '업로드일', 'URL'];
+                rows = videos.map((v, i) => [
+                    i + 1,
+                    v.video_id,
+                    (v.title || '').replace(/\t/g, ' '),
+                    v.video_type === 'shorts' ? '쇼츠' : '비디오',
+                    v.category_name || channelData.category || '',
+                    channelData.title || '',
+                    channelData.subscriber_count || '',
+                    v.view_count || 0,
+                    v.duration_sec || '',
+                    v.published_at || '',
+                    `https://youtube.com/watch?v=${v.video_id}`
+                ].join('\t'));
+            } else {
+                // DB 전체 데이터
+                headers = ['No.', 'video_id', 'channel_id', 'title', 'video_type', 'category_name', 'view_count', 'like_count', 'duration_sec', 'published_at'];
+                rows = videos.map((v, i) => [
+                    i + 1,
+                    v.video_id,
+                    v.channel_id || '',
+                    (v.title || '').replace(/\t/g, ' '),
+                    v.video_type || '',
+                    v.category_name || '',
+                    v.view_count || 0,
+                    v.like_count || '',
+                    v.duration_sec || '',
+                    v.published_at || ''
+                ].join('\t'));
+            }
+
+            // Excel-compatible CSV (Tab-separated with BOM for Korean)
             const content = '\ufeff' + headers.join('\t') + '\n' + rows.join('\n');
-            const blob = new Blob([content], { type: 'text/tab-separated-values;charset=utf-8' });
+            const blob = new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `channel_videos_${mode}_${videos.length}.tsv`;
+            a.download = `channel_videos_${mode}_${videos.length}.xls`;
             a.click();
             URL.revokeObjectURL(url);
-            showToast(`${videos.length}개 영상 다운로드 완료`, 'success');
+            showToast(`${videos.length}개 영상 Excel 다운로드 완료`, 'success');
         }
 
         // 채널 영상 테이블 복사
@@ -5606,20 +5644,47 @@
                 return;
             }
 
-            const headers = ['No.', '제목', '유형', '조회수', '길이', '업로드일', 'URL'];
-            const rows = videos.map((v, i) => [
-                i + 1,
-                v.title || '',
-                v.video_type === 'shorts' ? '쇼츠' : '비디오',
-                (v.view_count || 0).toLocaleString(),
-                v.duration_sec ? formatDuration(v.duration_sec) : '-',
-                v.published_at ? formatDate(v.published_at) : '-',
-                `https://youtube.com/watch?v=${v.video_id}`
-            ].join('\t'));
+            const source = document.getElementById('chExportSource')?.value || 'list';
+            const channelData = window.currentChannelData || {};
+
+            let headers, rows;
+
+            if (source === 'list') {
+                // 영상 목록 기준 (채널 정보 포함)
+                headers = ['No.', '영상ID', '제목', '유형', '카테고리', '채널명', '구독자수', '조회수', '길이', '업로드일', 'URL'];
+                rows = videos.map((v, i) => [
+                    i + 1,
+                    v.video_id,
+                    v.title || '',
+                    v.video_type === 'shorts' ? '쇼츠' : '비디오',
+                    v.category_name || channelData.category || '',
+                    channelData.title || '',
+                    channelData.subscriber_count ? channelData.subscriber_count.toLocaleString() : '',
+                    (v.view_count || 0).toLocaleString(),
+                    v.duration_sec ? formatDuration(v.duration_sec) : '-',
+                    v.published_at ? formatDate(v.published_at) : '-',
+                    `https://youtube.com/watch?v=${v.video_id}`
+                ].join('\t'));
+            } else {
+                // DB 전체 데이터
+                headers = ['No.', 'video_id', 'channel_id', 'title', 'video_type', 'category_name', 'view_count', 'like_count', 'duration_sec', 'published_at'];
+                rows = videos.map((v, i) => [
+                    i + 1,
+                    v.video_id,
+                    v.channel_id || '',
+                    v.title || '',
+                    v.video_type || '',
+                    v.category_name || '',
+                    v.view_count || 0,
+                    v.like_count || '',
+                    v.duration_sec || '',
+                    v.published_at || ''
+                ].join('\t'));
+            }
 
             const content = headers.join('\t') + '\n' + rows.join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                showToast(`${videos.length}개 영상 클립보드에 복사됨`, 'success');
+                showToast(`${videos.length}개 영상 클립보드에 복사됨 (${source === 'list' ? '목록 기준' : 'DB 기준'})`, 'success');
             }).catch(err => {
                 console.error('Clipboard error:', err);
                 showToast('클립보드 복사 실패', 'error');
