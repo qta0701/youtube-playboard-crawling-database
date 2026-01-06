@@ -468,6 +468,16 @@ def api_channels_list():
                 (SELECT COUNT(*) FROM api_videos av WHERE av.channel_id = ac.channel_id AND (av.duration_sec > 60 OR av.duration_sec IS NULL)) as longform_count
             FROM api_channels ac
             LEFT JOIN channels_rank cr ON ac.channel_id = cr.channel_id
+        '''
+        
+        # 영상 없는 채널 숨기기 필터
+        hide_empty = request.args.get('hide_empty', 'false').lower() == 'true'
+        if hide_empty:
+            query += '''
+            WHERE (SELECT COUNT(*) FROM api_videos av WHERE av.channel_id = ac.channel_id) > 0
+            '''
+        
+        query += f'''
             ORDER BY {sort_column} {sort_order}
             LIMIT ? OFFSET ?
         '''
@@ -477,7 +487,13 @@ def api_channels_list():
         channels = [dict(row) for row in cursor.fetchall()]
 
         # 총 개수 조회
-        cursor.execute('SELECT COUNT(*) as count FROM api_channels')
+        count_query = 'SELECT COUNT(*) as count FROM api_channels'
+        if hide_empty:
+            count_query = '''
+                SELECT COUNT(*) as count FROM api_channels ac
+                WHERE (SELECT COUNT(*) FROM api_videos av WHERE av.channel_id = ac.channel_id) > 0
+            '''
+        cursor.execute(count_query)
         total = cursor.fetchone()['count']
 
         conn.close()
@@ -720,6 +736,106 @@ def api_videos_list():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/videos/update-subscriber-data', methods=['POST'])
+def api_update_video_subscriber_data():
+    """영상 데이터에 최신 채널 구독자수 업데이트"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # api_videos 테이블에 subscriber_count 컬럼이 있는지 확인
+        cursor.execute("PRAGMA table_info(api_videos)")
+        columns = [col['name'] for col in cursor.fetchall()]
+        
+        if 'subscriber_count' not in columns:
+            # 컬럼 추가
+            cursor.execute("ALTER TABLE api_videos ADD COLUMN subscriber_count INTEGER DEFAULT 0")
+            conn.commit()
+            logger.info("api_videos 테이블에 subscriber_count 컬럼 추가됨")
+        
+        # api_channels에서 최신 구독자수를 가져와서 api_videos에 업데이트
+        update_query = '''
+            UPDATE api_videos
+            SET subscriber_count = (
+                SELECT ac.subscriber_count
+                FROM api_channels ac
+                WHERE ac.channel_id = api_videos.channel_id
+            )
+            WHERE channel_id IN (SELECT channel_id FROM api_channels)
+        '''
+        cursor.execute(update_query)
+        updated_count = cursor.rowcount
+        conn.commit()
+        
+        # 업데이트 결과 확인
+        cursor.execute('''
+            SELECT COUNT(*) as total, 
+                   SUM(CASE WHEN subscriber_count > 0 THEN 1 ELSE 0 END) as with_subs
+            FROM api_videos
+        ''')
+        stats = cursor.fetchone()
+        
+        conn.close()
+        
+        logger.info(f"영상 구독자 데이터 업데이트 완료: {updated_count}개 영상")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'{updated_count}개 영상의 구독자 데이터가 업데이트되었습니다.',
+            'updated_count': updated_count,
+            'total_videos': stats['total'] if stats else 0,
+            'videos_with_subscriber': stats['with_subs'] if stats else 0
+        })
+        
+    except Exception as e:
+        logger.error(f"Video subscriber data update error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/video/<video_id>')
+def api_video_detail(video_id):
+    """영상 상세 정보"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT
+                av.video_id,
+                av.channel_id,
+                av.title,
+                av.view_count,
+                av.like_count,
+                av.duration_sec,
+                av.video_type,
+                av.published_at,
+                av.last_updated,
+                av.channel_name,
+                av.category_name,
+                av.like_view_ratio,
+                av.daily_avg_views,
+                av.tags,
+                ac.thumbnail_url as channel_thumbnail,
+                ac.subscriber_count as channel_subscriber_count
+            FROM api_videos av
+            LEFT JOIN api_channels ac ON av.channel_id = ac.channel_id
+            WHERE av.video_id = ?
+        ''', (video_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            video = dict(row)
+            return jsonify({'status': 'success', 'video': video})
+        else:
+            return jsonify({'status': 'error', 'message': '영상을 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        logger.error(f"Video detail error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/api/channel/<channel_id>')
 def api_channel_detail(channel_id):
     """채널 상세 정보 (API 데이터)"""
@@ -774,16 +890,16 @@ def api_channel_detail(channel_id):
                 'avg_views': int(row['avg_views'] or 0)
             }
 
-        # 최근 영상 5개 (api_videos에는 thumbnail_url 컬럼 없음)
+        # 모든 영상 가져오기 (duration_sec 포함)
         cursor.execute('''
-            SELECT video_id, title, view_count, video_type, published_at
+            SELECT video_id, title, view_count, like_count, video_type, 
+                   published_at, duration_sec, category_name
             FROM api_videos
             WHERE channel_id = ?
             ORDER BY published_at DESC
-            LIMIT 5
         ''', (channel_id,))
 
-        recent_videos = [dict(row) for row in cursor.fetchall()]
+        videos = [dict(row) for row in cursor.fetchall()]
 
         conn.close()
 
@@ -791,7 +907,8 @@ def api_channel_detail(channel_id):
             'status': 'success',
             'channel': channel_data,
             'video_stats': video_stats,
-            'recent_videos': recent_videos
+            'videos': videos,
+            'recent_videos': videos[:5]  # 호환성을 위해 유지
         })
 
     except Exception as e:

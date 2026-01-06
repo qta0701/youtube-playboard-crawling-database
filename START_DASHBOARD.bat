@@ -104,9 +104,15 @@ if not errorlevel 1 (
     taskkill /F /IM python.exe /FI "WINDOWTITLE eq *dashboard_app.py*" >nul 2>&1
 )
 
+REM Force kill ALL python processes using port 5001 (more aggressive)
+echo [INFO] Force killing any remaining processes on port 5001...
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr :5001') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
+
 REM Wait for port to be released
 echo [INFO] Waiting for port 5001 to be released...
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
 echo.
 echo ===================================================

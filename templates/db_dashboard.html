@@ -2232,16 +2232,25 @@
                                 필터 적용</button>
                             <button onclick="resetAPIFilters()"
                                 style="padding:12px 28px;background:#666;color:white;border:none;border-radius:4px;cursor:pointer;font-size:14px;">초기화</button>
+                            <button onclick="updateVideoSubscriberData()"
+                                style="padding:12px 20px;background:#ff9800;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;"
+                                title="영상 데이터의 구독자수를 최신 채널 정보로 업데이트">🔄 구독자 업데이트</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Sub Tabs & View Mode Toggle (PLAN.md 2.1) -->
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
-                    <div class="sub-tabs">
+                    <div class="sub-tabs" style="display:flex;gap:10px;align-items:center;">
                         <button class="sub-tab active" data-subtype="channels">채널</button>
                         <button class="sub-tab" data-subtype="shorts">쇼츠</button>
                         <button class="sub-tab" data-subtype="videos">비디오</button>
+                        <label id="hideEmptyChannelsLabel"
+                            style="display:none;margin-left:15px;font-size:13px;cursor:pointer;color:#666;">
+                            <input type="checkbox" id="hideEmptyChannels" onchange="onHideEmptyChannelsChange()"
+                                style="margin-right:5px;">
+                            영상 없는 채널 숨기기
+                        </label>
                     </div>
 
                     <!-- View Mode Toggle (PLAN.md 2.1) -->
@@ -2278,19 +2287,19 @@
                     </div>
 
                     <!-- Center: Download & Copy Buttons -->
-                    <div style="display:flex;gap:6px;align-items:center;">
+                    <div style="display:flex;gap:8px;align-items:center;">
                         <button onclick="downloadApiDataExcel('all')"
-                            style="padding:5px 10px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            style="padding:10px 16px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;"
                             title="전체 데이터 엑셀 다운로드">
                             📥 전체 다운로드
                         </button>
                         <button onclick="downloadApiDataExcel('filtered')"
-                            style="padding:5px 10px;background:#2196f3;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            style="padding:10px 16px;background:#2196f3;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;"
                             title="현재 표시된 데이터만 엑셀 다운로드">
                             📥 필터 다운로드
                         </button>
                         <button onclick="copyApiTableToClipboard()"
-                            style="padding:5px 10px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+                            style="padding:10px 16px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;"
                             title="테이블 데이터 클립보드 복사">
                             📋 테이블 복사
                         </button>
@@ -2650,6 +2659,52 @@
             }
         });
 
+        // 전역 ESC 키 핸들러 - 모든 종류의 모달 닫기 (디버그 로깅 추가)
+        document.addEventListener('keydown', function (e) {
+            console.log('[KeyDebug] 키 입력:', e.key, 'keyCode:', e.keyCode);
+            if (e.key === 'Escape' || e.keyCode === 27) {
+                console.log('[KeyDebug] ESC 키 감지됨!');
+
+                // 1. customModal (새로운 모달) 닫기
+                const customModal = document.getElementById('customModal');
+                if (customModal) {
+                    customModal.remove();
+                    console.log('[Modal] customModal 닫음 - 성공');
+                    return;
+                }
+
+                // 2. channelModal (기존 채널 상세 모달) 닫기
+                const channelModal = document.getElementById('channelModal');
+                if (channelModal) {
+                    channelModal.remove();
+                    console.log('[Modal] channelModal 닫음 - 성공');
+                    return;
+                }
+
+                // 3. 'modal active' 클래스를 가진 모든 모달 닫기
+                const activeModals = document.querySelectorAll('.modal.active');
+                if (activeModals.length > 0) {
+                    activeModals.forEach(m => {
+                        m.classList.remove('active');
+                        m.style.display = 'none';
+                        console.log('[Modal] active 모달 닫음:', m.id || m.className);
+                    });
+                    return;
+                }
+
+                // 4. 다른 modal 클래스 모달 닫기
+                const anyModal = document.querySelector('.modal');
+                if (anyModal && anyModal.style.display !== 'none') {
+                    anyModal.style.display = 'none';
+                    console.log('[Modal] 일반 modal 닫음');
+                    return;
+                }
+
+                console.log('[Modal] 닫을 모달이 없음');
+            }
+        });
+        console.log('[Init] 전역 ESC 키 핸들러 등록 완료 (모든 모달 타입 지원)');
+
         // Setup Tabs
         function setupTabs() {
             document.querySelectorAll('.main-tab').forEach(tab => {
@@ -2678,6 +2733,7 @@
                     currentApiSubtype = tab.dataset.subtype;
                     apiPage = 1;
 
+                    updateHideEmptyChannelsVisibility();
                     loadApiData();
                     debugLog('TAB', `서브탭 전환: ${tab.dataset.subtype}, ViewMode: ${apiViewMode}`);
                 });
@@ -4107,6 +4163,10 @@
                     if (currentApiSortBy) {
                         url += `&sort_by=${currentApiSortBy}&sort_order=${currentApiSortOrder}`;
                     }
+                    // 영상 없는 채널 숨기기
+                    if (apiFilters.hideEmptyChannels) {
+                        url += `&hide_empty=true`;
+                    }
                 } else {
                     const type = currentApiSubtype === 'shorts' ? 'shorts' : 'video';
                     url = `/api/videos/list?type=${type}&limit=${PAGE_SIZE}&offset=${offset}`;
@@ -4184,26 +4244,32 @@
             // PLAN.md Phase 1: 채널 카드 UX 개선 - 더블클릭 제거, 명시적 버튼 추가
             grid.innerHTML = channels.map(ch => {
                 const escapedTitle = (ch.title || '알 수 없음').replace(/'/g, "\\'");
+                // Full number formatting
+                const subCount = ch.subscriber_count ? ch.subscriber_count.toLocaleString() : '0';
+                const videoCount = ch.video_count ? ch.video_count.toLocaleString() : '0';
+                const viewCount = ch.view_count ? ch.view_count.toLocaleString() : '0';
+
                 return `
                 <div class="thumb-card channel" onclick="showChannelDetail('${ch.channel_id}')">
-                    <img src="${ch.thumbnail_url || 'https://via.placeholder.com/100x100?text=N/A'}"
-                         onerror="this.src='https://via.placeholder.com/100x100?text=N/A'">
+                    <img src="${ch.thumbnail_url || ''}"
+                         style="background:#e0e0e0;"
+                         onerror="this.style.display='none'">
                     <div class="info">
-                        <div class="title">${ch.title || '알 수 없음'}</div>
-                        <div class="meta">
-                            <span class="badge channel">${ch.category || 'N/A'}</span>
+                        <div class="title" style="font-size:15px;font-weight:600;">${ch.title || '알 수 없음'}</div>
+                        <div class="meta" style="margin:6px 0;">
+                            <span class="badge channel" style="font-size:12px;">${ch.category || 'N/A'}</span>
                         </div>
-                        <div class="channel-stats">
-                            <span><span class="num">${formatNumber(ch.subscriber_count)}</span> 구독자</span>
-                            <span><span class="num">${formatNumber(ch.video_count)}</span> 영상</span>
-                            <span><span class="num">${formatNumber(ch.view_count)}</span> 조회수</span>
+                        <div class="channel-stats" style="font-size:13px;">
+                            <span><span class="num" style="font-weight:700;font-size:14px;color:#333;">${subCount}</span>명</span>
+                            <span><span class="num" style="font-weight:600;">${videoCount}</span>개 영상</span>
+                            <span><span class="num" style="font-weight:600;">${viewCount}</span>회</span>
                         </div>
                         <div class="card-actions" style="margin-top:10px; display:flex; gap:5px;">
-                            <button class="btn btn-sm" style="flex:1; background:#667eea; color:#fff; border:none; padding:6px; border-radius:4px; cursor:pointer; font-size:11px;"
+                            <button class="btn btn-sm" style="flex:1; background:#667eea; color:#fff; border:none; padding:8px; border-radius:4px; cursor:pointer; font-size:12px;"
                                     onclick="event.stopPropagation(); filterByChannel('${ch.channel_id}', '${escapedTitle}', 'shorts')">
                                 <i class="fas fa-mobile-alt"></i> 쇼츠
                             </button>
-                            <button class="btn btn-sm" style="flex:1; background:#3b82f6; color:#fff; border:none; padding:6px; border-radius:4px; cursor:pointer; font-size:11px;"
+                            <button class="btn btn-sm" style="flex:1; background:#3b82f6; color:#fff; border:none; padding:8px; border-radius:4px; cursor:pointer; font-size:12px;"
                                     onclick="event.stopPropagation(); filterByChannel('${ch.channel_id}', '${escapedTitle}', 'videos')">
                                 <i class="fas fa-video"></i> 비디오
                             </button>
@@ -4575,28 +4641,125 @@
             }
         }
 
+        // 게시일 프리셋 변경 핸들러
+        function onApiDatePresetChange() {
+            const preset = document.getElementById('apiDatePreset').value;
+            const dateFrom = document.getElementById('apiDateFrom');
+            const dateTo = document.getElementById('apiDateTo');
+            const dateSep = document.getElementById('apiDateSep');
+
+            if (preset === 'custom') {
+                dateFrom.style.display = 'block';
+                dateTo.style.display = 'block';
+                dateSep.style.display = 'block';
+            } else {
+                dateFrom.style.display = 'none';
+                dateTo.style.display = 'none';
+                dateSep.style.display = 'none';
+
+                // Calculate date range based on preset
+                if (preset) {
+                    const now = new Date();
+                    let fromDate = new Date();
+
+                    switch (preset) {
+                        case '3d': fromDate.setDate(now.getDate() - 3); break;
+                        case '7d': fromDate.setDate(now.getDate() - 7); break;
+                        case '14d': fromDate.setDate(now.getDate() - 14); break;
+                        case '1m': fromDate.setMonth(now.getMonth() - 1); break;
+                        case '3m': fromDate.setMonth(now.getMonth() - 3); break;
+                        case '6m': fromDate.setMonth(now.getMonth() - 6); break;
+                        case '1y': fromDate.setFullYear(now.getFullYear() - 1); break;
+                    }
+
+                    dateFrom.value = fromDate.toISOString().split('T')[0];
+                    dateTo.value = now.toISOString().split('T')[0];
+                } else {
+                    dateFrom.value = '';
+                    dateTo.value = '';
+                }
+            }
+        }
+
         function renderApiVideos(videos) {
             const grid = document.getElementById('apiThumbGrid');
             if (!videos || videos.length === 0) {
                 grid.innerHTML = `<div class="empty-state"><div class="icon">🎬</div><p>${currentApiSubtype === 'shorts' ? '쇼츠' : '비디오'}가 없습니다. 동기화된 채널에서 영상을 수집하세요.</p></div>`;
                 return;
             }
-            grid.innerHTML = videos.map(v => `
-                <div class="thumb-card" onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')">
+            grid.innerHTML = videos.map(v => {
+                // Full number formatting - check both field names for backward compatibility
+                const viewCount = v.view_count ? v.view_count.toLocaleString() : '0';
+                const subCount = (v.channel_subscriber_count || v.subscriber_count) ? (v.channel_subscriber_count || v.subscriber_count).toLocaleString() : '-';
+
+                // Format upload date
+                const uploadDate = v.published_at ? formatDate(v.published_at) : '-';
+
+                // Duration formatting
+                const duration = v.duration_sec ? formatDuration(v.duration_sec) : '';
+
+                // Channel thumbnail
+                const channelThumb = v.channel_thumbnail || '';
+
+                // Category
+                const category = v.category_name || '-';
+
+                // Escaped channel name for onclick
+                const escapedChannelName = (v.channel_name || '').replace(/'/g, "\\'");
+
+                return `
+                <div class="thumb-card" style="position:relative;">
                     <img src="https://img.youtube.com/vi/${v.video_id}/mqdefault.jpg"
-                         onerror="this.src='https://via.placeholder.com/320x180?text=No+Thumb'">
+                         style="cursor:pointer;"
+                         onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')"
+                         onerror="this.style.display='none'">
                     <div class="info">
-                        <div class="title">${v.title || '제목 없음'}</div>
-                        <div class="meta">
-                            <span class="views">${formatNumber(v.view_count)} 조회</span>
-                            <span class="badge ${v.video_type}">${v.video_type === 'shorts' ? '쇼츠' : '비디오'}</span>
+                        <div class="title" style="font-size:14px;font-weight:600;margin-bottom:10px;cursor:pointer;" 
+                             onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')">${v.title || '제목 없음'}</div>
+                        
+                        <!-- 조회수 & 영상길이 -->
+                        <div style="display:flex;gap:20px;margin-bottom:10px;">
+                            <div>
+                                <div style="font-size:11px;color:#666;">조회수</div>
+                                <div style="font-size:16px;font-weight:700;color:#000;">${viewCount}</div>
+                            </div>
+                            ${duration ? `
+                            <div>
+                                <div style="font-size:11px;color:#666;">영상길이</div>
+                                <div style="font-size:16px;font-weight:700;color:#000;">${duration}</div>
+                            </div>
+                            ` : ''}
                         </div>
-                        <div style="margin-top:8px;font-size:12px;color:#888;">
-                            ${v.channel_name || '알 수 없음'} ${v.duration_sec ? '• ' + formatDuration(v.duration_sec) : ''}
+                        
+                        <!-- 타입 & 카테고리 -->
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                            <span class="badge ${v.video_type}" style="font-size:12px;padding:3px 8px;">${v.video_type === 'shorts' ? '쇼츠' : '비디오'}</span>
+                            <span style="font-size:12px;color:#666;background:#f0f0f0;padding:3px 8px;border-radius:4px;">${getCategoryKorean(v.category_name)}</span>
                         </div>
+                        
+                        <!-- 채널 정보 (클릭 가능) -->
+                        <div style="display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid #eee;cursor:pointer;"
+                             onclick="event.stopPropagation(); showChannelDetail('${v.channel_id}')">
+                            ${channelThumb ? `<img src="${channelThumb}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" onerror="this.style.display='none'">` : '<div style="width:32px;height:32px;border-radius:50%;background:#ddd;"></div>'}
+                            <div style="flex:1;">
+                                <div style="font-size:14px;font-weight:600;color:#000;">${v.channel_name || '알 수 없음'}</div>
+                                <div style="font-size:13px;color:#000;font-weight:500;">구독자 ${subCount}명</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 업로드 날짜 -->
+                        <div style="font-size:13px;color:#000;margin-top:8px;font-weight:500;">
+                            📅 업로드: ${uploadDate}
+                        </div>
+                        
+                        <!-- 상세보기 버튼 -->
+                        <button onclick="event.stopPropagation(); showVideoDetail('${v.video_id}')"
+                                style="position:absolute;bottom:10px;right:10px;padding:10px 18px;background:#667eea;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 2px 8px rgba(102,126,234,0.3);">
+                            📊 상세
+                        </button>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         function updateApiPagination() {
@@ -4717,16 +4880,63 @@
 
         // 필터 적용 (PLAN.md - 검색/필터 기능)
         function applyAPIFilters() {
+            // Get view filter value
+            const viewValueEl = document.getElementById('apiViewValue');
+            const viewUnitEl = document.getElementById('apiViewUnit');
+            const viewOpEl = document.getElementById('apiViewOp');
+
+            let viewMin = null, viewMax = null;
+            if (viewValueEl && viewValueEl.value && viewUnitEl) {
+                const viewAmount = parseInt(viewValueEl.value) * parseInt(viewUnitEl.value);
+                if (viewOpEl && viewOpEl.value === 'gte') {
+                    viewMin = viewAmount;
+                } else {
+                    viewMax = viewAmount;
+                }
+            }
+
+            // Get subscriber filter value
+            const subValueEl = document.getElementById('apiSubValue');
+            const subUnitEl = document.getElementById('apiSubUnit');
+            const subOpEl = document.getElementById('apiSubOp');
+
+            let subMin = null, subMax = null;
+            if (subValueEl && subValueEl.value && subUnitEl) {
+                const subAmount = parseInt(subValueEl.value) * parseInt(subUnitEl.value);
+                if (subOpEl && subOpEl.value === 'gte') {
+                    subMin = subAmount;
+                } else {
+                    subMax = subAmount;
+                }
+            }
+
+            // Get like ratio filter
+            const likeRatioValueEl = document.getElementById('apiLikeRatioValue');
+            const likeRatioOpEl = document.getElementById('apiLikeRatioOp');
+
+            let likeRatioMin = null, likeRatioMax = null;
+            if (likeRatioValueEl && likeRatioValueEl.value) {
+                const likeRatioAmount = parseFloat(likeRatioValueEl.value);
+                if (likeRatioOpEl && likeRatioOpEl.value === 'gte') {
+                    likeRatioMin = likeRatioAmount;
+                } else {
+                    likeRatioMax = likeRatioAmount;
+                }
+            }
+
             apiFilters = {
-                search: document.getElementById('apiSearchInput').value.trim(),
-                viewMin: document.getElementById('apiViewMin').value,
-                viewMax: document.getElementById('apiViewMax').value,
-                likeRatioMin: document.getElementById('apiLikeRatioMin').value,
-                likeRatioMax: document.getElementById('apiLikeRatioMax').value,
-                dateFrom: document.getElementById('apiDateFrom').value,
-                dateTo: document.getElementById('apiDateTo').value,
-                category: document.getElementById('apiCategoryFilter').value,
-                sortBy: document.getElementById('apiSortBy').value
+                search: document.getElementById('apiSearchInput')?.value?.trim() || '',
+                viewMin: viewMin,
+                viewMax: viewMax,
+                subscriberMin: subMin,
+                subscriberMax: subMax,
+                likeRatioMin: likeRatioMin,
+                likeRatioMax: likeRatioMax,
+                dateFrom: document.getElementById('apiDateFrom')?.value || '',
+                dateTo: document.getElementById('apiDateTo')?.value || '',
+                category: document.getElementById('apiCategoryFilter')?.value || '',
+                country: document.getElementById('apiCountryFilter')?.value || '',
+                sortBy: document.getElementById('apiSortBy')?.value || 'published_desc'
             };
 
             apiPage = 1;  // 필터 적용 시 첫 페이지로
@@ -4736,20 +4946,89 @@
 
         // 필터 초기화 (PLAN.md - 검색/필터 기능)
         function resetAPIFilters() {
-            document.getElementById('apiSearchInput').value = '';
-            document.getElementById('apiViewMin').value = '';
-            document.getElementById('apiViewMax').value = '';
-            document.getElementById('apiLikeRatioMin').value = '';
-            document.getElementById('apiLikeRatioMax').value = '';
-            document.getElementById('apiDateFrom').value = '';
-            document.getElementById('apiDateTo').value = '';
-            document.getElementById('apiCategoryFilter').value = '';
-            document.getElementById('apiSortBy').value = 'published_desc';
+            const searchInput = document.getElementById('apiSearchInput');
+            if (searchInput) searchInput.value = '';
+
+            const viewValue = document.getElementById('apiViewValue');
+            if (viewValue) viewValue.value = '';
+
+            const viewUnit = document.getElementById('apiViewUnit');
+            if (viewUnit) viewUnit.value = '10000';
+
+            const viewOp = document.getElementById('apiViewOp');
+            if (viewOp) viewOp.value = 'gte';
+
+            const subValue = document.getElementById('apiSubValue');
+            if (subValue) subValue.value = '';
+
+            const subUnit = document.getElementById('apiSubUnit');
+            if (subUnit) subUnit.value = '10000';
+
+            const subOp = document.getElementById('apiSubOp');
+            if (subOp) subOp.value = 'gte';
+
+            const likeRatioValue = document.getElementById('apiLikeRatioValue');
+            if (likeRatioValue) likeRatioValue.value = '';
+
+            const likeRatioOp = document.getElementById('apiLikeRatioOp');
+            if (likeRatioOp) likeRatioOp.value = 'gte';
+
+            const datePreset = document.getElementById('apiDatePreset');
+            if (datePreset) datePreset.value = '';
+
+            const dateFrom = document.getElementById('apiDateFrom');
+            if (dateFrom) { dateFrom.value = ''; dateFrom.style.display = 'none'; }
+
+            const dateTo = document.getElementById('apiDateTo');
+            if (dateTo) { dateTo.value = ''; dateTo.style.display = 'none'; }
+
+            const dateSep = document.getElementById('apiDateSep');
+            if (dateSep) dateSep.style.display = 'none';
+
+            const categoryFilter = document.getElementById('apiCategoryFilter');
+            if (categoryFilter) categoryFilter.value = '';
+
+            const countryFilter = document.getElementById('apiCountryFilter');
+            if (countryFilter) countryFilter.value = '';
+
+            const sortBy = document.getElementById('apiSortBy');
+            if (sortBy) sortBy.value = 'published_desc';
 
             apiFilters = {};
             apiPage = 1;
             loadApiData();
             debugLog('INFO', 'API 필터 초기화됨');
+        }
+
+        // 영상 데이터의 구독자수를 최신 채널 정보로 업데이트
+        async function updateVideoSubscriberData() {
+            if (!confirm('모든 영상 데이터의 구독자수를 최신 채널 정보로 업데이트하시겠습니까?')) {
+                return;
+            }
+
+            showToast('구독자 데이터 업데이트 중...', 'info');
+
+            try {
+                const response = await fetch('/api/videos/update-subscriber-data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showToast(`✅ ${data.message}`, 'success');
+                    debugLog('SUCCESS', `구독자 업데이트 완료: ${data.updated_count}개 영상`);
+
+                    // 현재 데이터 새로고침
+                    loadApiData();
+                } else {
+                    showToast(`❌ 업데이트 실패: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Subscriber update error:', error);
+                showToast(`❌ 업데이트 오류: ${error.message}`, 'error');
+            }
         }
 
         // PLAN.md 2.2: 채널별 필터링 함수
@@ -4796,6 +5075,557 @@
 
             debugLog('INFO', '채널 필터 해제');
         }
+
+        // 영상 없는 채널 숨기기 토글
+        function onHideEmptyChannelsChange() {
+            const checkbox = document.getElementById('hideEmptyChannels');
+            apiFilters.hideEmptyChannels = checkbox ? checkbox.checked : false;
+            apiPage = 1;
+            loadApiData();
+            debugLog('INFO', `영상 없는 채널 숨기기: ${apiFilters.hideEmptyChannels}`);
+        }
+
+        // 서브탭 변경 시 숨기기 옵션 표시/숨김
+        function updateHideEmptyChannelsVisibility() {
+            const label = document.getElementById('hideEmptyChannelsLabel');
+            if (label) {
+                label.style.display = currentApiSubtype === 'channels' ? 'flex' : 'none';
+            }
+        }
+
+        // 영상 상세 정보 보기
+        async function showVideoDetail(videoId) {
+            try {
+                const response = await fetch(`/api/video/${videoId}`);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    const v = data.video;
+                    const subCount = (v.channel_subscriber_count || v.subscriber_count || 0).toLocaleString();
+                    const viewCount = (v.view_count || 0).toLocaleString();
+                    const likeCount = (v.like_count || 0).toLocaleString();
+                    const duration = v.duration_sec ? formatDuration(v.duration_sec) : '-';
+                    const uploadDate = v.published_at ? formatDate(v.published_at) : '-';
+                    const likeRatio = v.like_view_ratio ? (v.like_view_ratio * 100).toFixed(2) + '%' : '-';
+                    const dailyViews = v.daily_avg_views ? Math.round(v.daily_avg_views).toLocaleString() : '-';
+
+                    const content = `
+                        <div style="max-width:600px;padding:20px;">
+                            <div style="display:flex;gap:15px;margin-bottom:20px;">
+                                <img src="https://img.youtube.com/vi/${v.video_id}/mqdefault.jpg" 
+                                     style="width:200px;border-radius:8px;">
+                                <div style="flex:1;">
+                                    <h3 style="margin:0 0 10px 0;font-size:16px;">${v.title || '제목 없음'}</h3>
+                                    <div style="font-size:14px;color:#666;">${v.channel_name || '알 수 없음'} • 구독자 ${subCount}명</div>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;">
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">조회수</div>
+                                    <div style="font-size:18px;font-weight:700;">${viewCount}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">좋아요</div>
+                                    <div style="font-size:18px;font-weight:700;">${likeCount}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">영상길이</div>
+                                    <div style="font-size:18px;font-weight:700;">${duration}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">좋아요 비율</div>
+                                    <div style="font-size:18px;font-weight:700;">${likeRatio}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">일평균 조회수</div>
+                                    <div style="font-size:18px;font-weight:700;">${dailyViews}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:12px;color:#666;">업로드일</div>
+                                    <div style="font-size:14px;font-weight:700;">${uploadDate}</div>
+                                </div>
+                            </div>
+                            <div style="margin-top:15px;display:flex;gap:10px;">
+                                <button onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')"
+                                        style="flex:1;padding:12px;background:#ff0000;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+                                    ▶ YouTube에서 보기
+                                </button>
+                                <button onclick="document.getElementById('customModal')?.remove(); showChannelDetail('${v.channel_id}')"
+                                        style="flex:1;padding:12px;background:#667eea;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+                                    📺 채널 보기
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    showModal('📊 영상 상세 정보', content);
+                } else {
+                    showToast('영상 정보를 불러올 수 없습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('Video detail error:', error);
+                showToast(`오류: ${error.message}`, 'error');
+            }
+        }
+
+        // 모달 표시 함수
+        function showModal(title, content) {
+            // Remove existing modal if any
+            const existingModal = document.getElementById('customModal');
+            if (existingModal) existingModal.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'customModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+            modal.innerHTML = `
+                <div style="background:#fff;border-radius:12px;max-width:90%;max-height:90%;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid #eee;">
+                        <h2 style="margin:0;font-size:18px;">${title}</h2>
+                        <button onclick="closeModal()" 
+                                style="background:none;border:none;font-size:24px;cursor:pointer;color:#999;">&times;</button>
+                    </div>
+                    <div>${content}</div>
+                </div>
+            `;
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeModal();
+            });
+
+            // ESC 키로 모달 닫기
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+
+            document.body.appendChild(modal);
+        }
+
+        // 모달 닫기 함수
+        function closeModal() {
+            const modal = document.getElementById('customModal');
+            if (modal) modal.remove();
+        }
+
+        // 카테고리 한글 매핑
+        const categoryKorean = {
+            'Music': '음악',
+            'Gaming': '게임',
+            'Entertainment': '엔터테인먼트',
+            'Education': '교육',
+            'People & Blogs': '인물/블로그',
+            'Comedy': '코미디',
+            'Sports': '스포츠',
+            'Science & Technology': '과학/기술',
+            'Howto & Style': '노하우/스타일',
+            'News & Politics': '뉴스/정치',
+            'Film & Animation': '영화/애니메이션',
+            'Autos & Vehicles': '자동차',
+            'Travel & Events': '여행/이벤트',
+            'Pets & Animals': '반려동물',
+            'Nonprofits & Activism': '비영리/활동'
+        };
+
+        function getCategoryKorean(category) {
+            return categoryKorean[category] || category || '-';
+        }
+
+        // 채널 상세 정보 보기
+        async function showChannelDetail(channelId) {
+            try {
+                const response = await fetch(`/api/channel/${channelId}`);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    const ch = data.channel;
+                    const videos = data.videos || [];
+                    const stats = data.stats || {};
+
+                    const subCount = (ch.subscriber_count || 0).toLocaleString();
+                    const totalViews = (ch.view_count || 0).toLocaleString();
+                    const videoCount = ch.video_count || 0;
+                    const createdAt = ch.created_at ? formatDate(ch.created_at) : '-';
+
+                    // 쇼츠/롱폼 통계 계산
+                    const shortsVideos = videos.filter(v => v.video_type === 'shorts');
+                    const longformVideos = videos.filter(v => v.video_type !== 'shorts');
+                    const shortsViews = shortsVideos.reduce((sum, v) => sum + (v.view_count || 0), 0);
+                    const longformViews = longformVideos.reduce((sum, v) => sum + (v.view_count || 0), 0);
+
+                    // 최근 업로드일
+                    const latestUpload = videos.length > 0 ? formatDate(videos[0].published_at) : '-';
+
+                    const content = `
+                        <div style="width:900px;max-width:100%;padding:20px;">
+                            <!-- 채널 헤더 + 내보내기 버튼 -->
+                            <div style="display:flex;gap:20px;margin-bottom:20px;align-items:flex-start;">
+                                <img src="${ch.thumbnail_url || ''}" 
+                                     style="width:80px;height:80px;border-radius:50%;object-fit:cover;background:#eee;flex-shrink:0;"
+                                     onerror="this.style.display='none'">
+                                <div style="flex:1;">
+                                    <div style="display:flex;align-items:center;gap:15px;">
+                                        <h3 style="margin:0;font-size:20px;">${ch.title || '알 수 없음'}</h3>
+                                        <span style="font-size:16px;color:#666;font-weight:600;">구독자 ${subCount}명</span>
+                                    </div>
+                                    <div style="font-size:13px;color:#666;margin-top:6px;">
+                                        📅 개설일: ${createdAt} • 최근 업로드: ${latestUpload}
+                                    </div>
+                                    <div style="font-size:13px;color:#888;margin-top:4px;">
+                                        카테고리: ${getCategoryKorean(ch.category)}
+                                    </div>
+                                </div>
+                                <!-- 내보내기 버튼 그룹 -->
+                                <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+                                    <div style="display:flex;gap:6px;">
+                                        <button onclick="downloadChannelVideos('selected')" 
+                                                style="padding:6px 10px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;">
+                                            📥 선택 다운로드
+                                        </button>
+                                        <button onclick="copyChannelVideos('selected')" 
+                                                style="padding:6px 10px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;">
+                                            📋 선택 복사
+                                        </button>
+                                    </div>
+                                    <div style="display:flex;gap:6px;align-items:center;">
+                                        <span style="font-size:11px;color:#666;">상위</span>
+                                        <input type="number" id="chTopNInput" value="10" min="1" max="100" 
+                                               style="width:50px;padding:4px;border:1px solid #ddd;border-radius:4px;font-size:11px;text-align:center;">
+                                        <span style="font-size:11px;color:#666;">개</span>
+                                        <button onclick="downloadChannelVideos('topN')" 
+                                                style="padding:6px 8px;background:#2196f3;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">
+                                            📥
+                                        </button>
+                                        <button onclick="copyChannelVideos('topN')" 
+                                                style="padding:6px 8px;background:#607d8b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">
+                                            📋
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 통계 카드 -->
+                            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:11px;color:#666;">총 조회수</div>
+                                    <div style="font-size:16px;font-weight:700;">${totalViews}</div>
+                                </div>
+                                <div onclick="closeModal(); filterByChannel('${ch.channel_id}', '${(ch.title || '').replace(/'/g, "\\'")}', 'shorts')" 
+                                     style="background:#ff6b6b;padding:12px;border-radius:8px;text-align:center;cursor:pointer;color:#fff;">
+                                    <div style="font-size:11px;">🎬 쇼츠</div>
+                                    <div style="font-size:16px;font-weight:700;">${shortsVideos.length}개</div>
+                                </div>
+                                <div onclick="closeModal(); filterByChannel('${ch.channel_id}', '${(ch.title || '').replace(/'/g, "\\'")}', 'videos')" 
+                                     style="background:#4dabf7;padding:12px;border-radius:8px;text-align:center;cursor:pointer;color:#fff;">
+                                    <div style="font-size:11px;">📺 롱폼</div>
+                                    <div style="font-size:16px;font-weight:700;">${longformVideos.length}개</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:11px;color:#666;">쇼츠 조회수</div>
+                                    <div style="font-size:14px;font-weight:700;">${shortsViews.toLocaleString()}</div>
+                                </div>
+                                <div style="background:#f5f5f5;padding:12px;border-radius:8px;text-align:center;">
+                                    <div style="font-size:11px;color:#666;">롱폼 조회수</div>
+                                    <div style="font-size:14px;font-weight:700;">${longformViews.toLocaleString()}</div>
+                                </div>
+                            </div>
+                            
+                            <!-- 버튼 -->
+                            <div style="display:flex;gap:10px;margin-bottom:20px;">
+                                <button onclick="window.open('https://youtube.com/channel/${ch.channel_id}', '_blank')"
+                                        style="flex:1;padding:10px;background:#ff0000;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+                                    ▶ 채널 바로가기
+                                </button>
+                                <button id="chFilterShorts" onclick="filterChannelVideos('shorts')"
+                                        style="flex:1;padding:10px;background:#667eea;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+                                    🎬 쇼츠만 보기
+                                </button>
+                                <button id="chFilterLongform" onclick="filterChannelVideos('longform')"
+                                        style="flex:1;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+                                    📺 롱폼만 보기
+                                </button>
+                            </div>
+                            
+                            <!-- 영상 리스트 헤더 -->
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="checkbox" id="chSelectAll" onchange="toggleChannelSelectAll(this)" 
+                                           style="width:18px;height:18px;cursor:pointer;">
+                                    <h4 style="margin:0;font-size:16px;">📹 영상 목록 (<span id="chVideoCount">${videos.length}</span>개)</h4>
+                                </div>
+                                <div style="display:flex;gap:8px;">
+                                    <button id="chSortLatest" onclick="sortChannelVideos('latest')" 
+                                            style="padding:6px 12px;background:#667eea;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">최신순</button>
+                                    <button id="chSortViews" onclick="sortChannelVideos('views')" 
+                                            style="padding:6px 12px;background:#ddd;color:#333;border:none;border-radius:4px;cursor:pointer;font-size:12px;">조회수순</button>
+                                    <button id="chSortDuration" onclick="sortChannelVideos('duration')" 
+                                            style="padding:6px 12px;background:#ddd;color:#333;border:none;border-radius:4px;cursor:pointer;font-size:12px;">길이순</button>
+                                    <button id="chFilterAll" onclick="filterChannelVideos('all')" 
+                                            style="padding:6px 12px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">전체</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 영상 리스트 (스크롤 600px) -->
+                            <div id="channelVideosList" style="max-height:600px;overflow-y:auto;border:1px solid #eee;border-radius:8px;">
+                                ${renderChannelVideosList(videos)}
+                            </div>
+                            </div>
+                        </div>
+                    `;
+
+                    // Store videos data for sorting/filtering
+                    window.channelVideosData = videos;
+                    window.channelVideosSortBy = 'latest';
+                    window.channelVideosFilter = 'all';
+
+                    showModal('📺 채널 상세 정보', content);
+                } else {
+                    showToast('채널 정보를 불러올 수 없습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('Channel detail error:', error);
+                showToast(`오류: ${error.message}`, 'error');
+            }
+        }
+
+        // 채널 영상 리스트 렌더링 (개선된 UI + 체크박스 + No.)
+        function renderChannelVideosList(videos) {
+            if (!videos || videos.length === 0) {
+                return '<div style="padding:40px;text-align:center;color:#888;">영상이 없습니다.</div>';
+            }
+
+            return videos.map((v, idx) => {
+                const viewCount = (v.view_count || 0).toLocaleString();
+                const duration = v.duration_sec ? formatDuration(v.duration_sec) : '-';
+                const uploadDate = v.published_at ? formatDate(v.published_at) : '-';
+                const typeLabel = v.video_type === 'shorts' ? '쇼츠' : '비디오';
+                const typeColor = v.video_type === 'shorts' ? '#ff6b6b' : '#4dabf7';
+                const typeBg = v.video_type === 'shorts' ? '#fff0f0' : '#f0f7ff';
+
+                return `
+                    <div class="ch-video-item" data-video-id="${v.video_id}" data-idx="${idx}"
+                         style="display:flex;gap:12px;padding:12px 15px;border-bottom:1px solid #eee;transition:background 0.2s;align-items:center;"
+                         onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='transparent'">
+                        <!-- 체크박스 -->
+                        <input type="checkbox" class="ch-video-check" data-video-id="${v.video_id}" 
+                               onclick="event.stopPropagation(); updateChannelSelectedCount();"
+                               style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+                        <!-- No. -->
+                        <div style="width:35px;text-align:center;font-weight:700;color:#667eea;font-size:14px;flex-shrink:0;">${idx + 1}</div>
+                        <!-- 썸네일 -->
+                        <img src="https://img.youtube.com/vi/${v.video_id}/mqdefault.jpg" 
+                             onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')"
+                             style="width:120px;height:68px;border-radius:6px;object-fit:cover;flex-shrink:0;cursor:pointer;">
+                        <!-- 정보 -->
+                        <div onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')"
+                             style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;">
+                            <div style="font-size:14px;font-weight:600;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#333;">${v.title || '제목 없음'}</div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                                <span style="background:${typeBg};color:${typeColor};font-weight:700;font-size:12px;padding:2px 8px;border-radius:4px;">${typeLabel}</span>
+                                <span style="font-size:13px;color:#333;">👁 ${viewCount}</span>
+                                <span style="font-size:13px;color:#333;">⏱ ${duration}</span>
+                                <span style="font-size:13px;color:#666;">📅 ${uploadDate}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 채널 영상 정렬
+        function sortChannelVideos(sortBy) {
+            window.channelVideosSortBy = sortBy;
+            let videos = [...window.channelVideosData];
+
+            // Apply current filter
+            if (window.channelVideosFilter === 'shorts') {
+                videos = videos.filter(v => v.video_type === 'shorts');
+            } else if (window.channelVideosFilter === 'longform') {
+                videos = videos.filter(v => v.video_type !== 'shorts');
+            }
+
+            // Sort
+            switch (sortBy) {
+                case 'latest':
+                    videos.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+                    break;
+                case 'views':
+                    videos.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+                    break;
+                case 'duration':
+                    videos.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0));
+                    break;
+            }
+
+            // Update UI
+            document.getElementById('channelVideosList').innerHTML = renderChannelVideosList(videos);
+
+            // Update button styles
+            ['chSortLatest', 'chSortViews', 'chSortDuration'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.style.background = '#ddd';
+                    btn.style.color = '#333';
+                }
+            });
+            const activeBtn = document.getElementById('chSort' + sortBy.charAt(0).toUpperCase() + sortBy.slice(1));
+            if (activeBtn) {
+                activeBtn.style.background = '#667eea';
+                activeBtn.style.color = '#fff';
+            }
+        }
+
+        // 채널 영상 필터링
+        function filterChannelVideos(filter) {
+            window.channelVideosFilter = filter;
+            sortChannelVideos(window.channelVideosSortBy);
+
+            // Update filter button styles
+            ['chFilterShorts', 'chFilterLongform', 'chFilterAll'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.style.background = '#ddd';
+                    btn.style.color = '#333';
+                }
+            });
+
+            const activeBtn = document.getElementById(
+                filter === 'shorts' ? 'chFilterShorts' :
+                    filter === 'longform' ? 'chFilterLongform' : 'chFilterAll'
+            );
+            if (activeBtn) {
+                activeBtn.style.background = filter === 'all' ? '#4caf50' : '#667eea';
+                activeBtn.style.color = '#fff';
+            }
+        }
+
+        // 채널 영상 전체 선택/해제
+        function toggleChannelSelectAll(checkbox) {
+            const checkboxes = document.querySelectorAll('.ch-video-check');
+            checkboxes.forEach(cb => cb.checked = checkbox.checked);
+            updateChannelSelectedCount();
+        }
+
+        // 선택된 영상 수 업데이트
+        function updateChannelSelectedCount() {
+            const checked = document.querySelectorAll('.ch-video-check:checked').length;
+            const total = document.querySelectorAll('.ch-video-check').length;
+            const countSpan = document.getElementById('chVideoCount');
+            if (countSpan) {
+                countSpan.textContent = checked > 0 ? `${checked}/${total} 선택` : total;
+            }
+            // 전체 선택 체크박스 상태 업데이트
+            const selectAll = document.getElementById('chSelectAll');
+            if (selectAll) {
+                selectAll.checked = checked === total && total > 0;
+                selectAll.indeterminate = checked > 0 && checked < total;
+            }
+        }
+
+        // 채널 영상 다운로드/복사 - 선택 또는 상위 N개
+        function getChannelVideosForExport(mode) {
+            let videos = [];
+            const currentVideos = getCurrentFilteredChannelVideos();
+
+            if (mode === 'selected') {
+                const checkedIds = Array.from(document.querySelectorAll('.ch-video-check:checked'))
+                    .map(cb => cb.dataset.videoId);
+                videos = currentVideos.filter(v => checkedIds.includes(v.video_id));
+            } else if (mode === 'topN') {
+                const n = parseInt(document.getElementById('chTopNInput')?.value || 10);
+                videos = currentVideos.slice(0, n);
+            }
+            return videos;
+        }
+
+        function getCurrentFilteredChannelVideos() {
+            let videos = [...(window.channelVideosData || [])];
+            const filter = window.channelVideosFilter || 'all';
+            const sortBy = window.channelVideosSortBy || 'latest';
+
+            // Filter
+            if (filter === 'shorts') {
+                videos = videos.filter(v => v.video_type === 'shorts');
+            } else if (filter === 'longform') {
+                videos = videos.filter(v => v.video_type !== 'shorts');
+            }
+
+            // Sort
+            switch (sortBy) {
+                case 'latest':
+                    videos.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+                    break;
+                case 'views':
+                    videos.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+                    break;
+                case 'duration':
+                    videos.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0));
+                    break;
+            }
+            return videos;
+        }
+
+        // 채널 영상 엑셀 다운로드
+        function downloadChannelVideos(mode) {
+            const videos = getChannelVideosForExport(mode);
+            if (videos.length === 0) {
+                showToast(mode === 'selected' ? '선택된 영상이 없습니다.' : '다운로드할 영상이 없습니다.', 'warning');
+                return;
+            }
+
+            // TSV 형식으로 생성
+            const headers = ['No.', '제목', '영상 유형', '조회수', '길이(초)', '업로드일', 'Video ID', 'URL'];
+            const rows = videos.map((v, i) => [
+                i + 1,
+                v.title || '',
+                v.video_type === 'shorts' ? '쇼츠' : '비디오',
+                v.view_count || 0,
+                v.duration_sec || '',
+                v.published_at || '',
+                v.video_id,
+                `https://youtube.com/watch?v=${v.video_id}`
+            ].join('\t'));
+
+            const content = '\ufeff' + headers.join('\t') + '\n' + rows.join('\n');
+            const blob = new Blob([content], { type: 'text/tab-separated-values;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `channel_videos_${mode}_${videos.length}.tsv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`${videos.length}개 영상 다운로드 완료`, 'success');
+        }
+
+        // 채널 영상 테이블 복사
+        function copyChannelVideos(mode) {
+            const videos = getChannelVideosForExport(mode);
+            if (videos.length === 0) {
+                showToast(mode === 'selected' ? '선택된 영상이 없습니다.' : '복사할 영상이 없습니다.', 'warning');
+                return;
+            }
+
+            const headers = ['No.', '제목', '유형', '조회수', '길이', '업로드일', 'URL'];
+            const rows = videos.map((v, i) => [
+                i + 1,
+                v.title || '',
+                v.video_type === 'shorts' ? '쇼츠' : '비디오',
+                (v.view_count || 0).toLocaleString(),
+                v.duration_sec ? formatDuration(v.duration_sec) : '-',
+                v.published_at ? formatDate(v.published_at) : '-',
+                `https://youtube.com/watch?v=${v.video_id}`
+            ].join('\t'));
+
+            const content = headers.join('\t') + '\n' + rows.join('\n');
+            navigator.clipboard.writeText(content).then(() => {
+                showToast(`${videos.length}개 영상 클립보드에 복사됨`, 'success');
+            }).catch(err => {
+                console.error('Clipboard error:', err);
+                showToast('클립보드 복사 실패', 'error');
+            });
+        }
+
 
         // Load Crawl History
         async function loadCrawlHistory() {
@@ -5065,85 +5895,8 @@
         }
 
         // ============================================================
-
-        // Channel Detail Modal
-        async function showChannelDetail(channelId) {
-            const modal = document.getElementById('channelModal');
-            const body = document.getElementById('channelModalBody');
-            modal.classList.add('active');
-            body.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-
-            try {
-                const res = await fetch(`/api/channel/${channelId}`);
-                const data = await res.json();
-
-                if (data.status === 'success') {
-                    const ch = data.channel;
-                    const stats = data.video_stats;
-                    body.innerHTML = `
-                        <div style="display:flex;gap:20px;margin-bottom:20px;">
-                            <img src="${ch.thumbnail_url || 'https://via.placeholder.com/80'}"
-                                 style="width:80px;height:80px;border-radius:50%;object-fit:cover;">
-                            <div>
-                                <h4 style="margin-bottom:8px;">${ch.title || '알 수 없음'}</h4>
-                                <p style="color:#888;font-size:13px;">${ch.category || 'N/A'} • ${ch.country || 'N/A'}</p>
-                                <div style="display:flex;gap:20px;margin-top:10px;">
-                                    <div style="text-align:center;">
-                                        <div style="font-weight:700;color:#667eea;">${formatNumber(ch.subscriber_count)}</div>
-                                        <div style="font-size:11px;color:#888;">구독자</div>
-                                    </div>
-                                    <div style="text-align:center;">
-                                        <div style="font-weight:700;color:#667eea;">${formatNumber(ch.view_count)}</div>
-                                        <div style="font-size:11px;color:#888;">조회수</div>
-                                    </div>
-                                    <div style="text-align:center;">
-                                        <div style="font-weight:700;color:#667eea;">${formatNumber(ch.video_count)}</div>
-                                        <div style="font-size:11px;color:#888;">영상 수</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="display:flex;gap:15px;margin-bottom:20px;">
-                            <div style="flex:1;background:#f9f9f9;padding:15px;border-radius:8px;text-align:center;">
-                                <div style="font-size:24px;font-weight:700;color:#ff5252;">${stats.shorts?.count || 0}</div>
-                                <div style="font-size:12px;color:#888;">쇼츠</div>
-                            </div>
-                            <div style="flex:1;background:#f9f9f9;padding:15px;border-radius:8px;text-align:center;">
-                                <div style="font-size:24px;font-weight:700;color:#2196f3;">${stats.video?.count || 0}</div>
-                                <div style="font-size:12px;color:#888;">비디오</div>
-                            </div>
-                        </div>
-                        <h4 style="margin-bottom:10px;">최근 영상</h4>
-                        ${data.recent_videos.length > 0 ? data.recent_videos.map(v => `
-                            <div style="display:flex;gap:10px;padding:10px;background:#f9f9f9;border-radius:8px;margin-bottom:8px;cursor:pointer;"
-                                 onclick="window.open('https://youtube.com/watch?v=${v.video_id}', '_blank')">
-                                <img src="https://img.youtube.com/vi/${v.video_id}/default.jpg"
-                                     style="width:80px;height:45px;object-fit:cover;border-radius:4px;">
-                                <div style="flex:1;overflow:hidden;">
-                                    <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${v.title}</div>
-                                    <div style="font-size:11px;color:#888;margin-top:4px;">
-                                        ${formatNumber(v.view_count)} 조회 •
-                                        <span style="color:${v.video_type === 'shorts' ? '#ff5252' : '#2196f3'}">${v.video_type === 'shorts' ? '쇼츠' : '비디오'}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('') : '<p style="color:#888;">수집된 영상이 없습니다</p>'}
-                    `;
-                } else {
-                    body.innerHTML = '<p style="color:#f44336;">로드 실패</p>';
-                }
-            } catch (e) {
-                body.innerHTML = '<p style="color:#f44336;">오류 발생</p>';
-            }
-        }
-
-        function closeModal() {
-            document.getElementById('channelModal').classList.remove('active');
-        }
-
-        document.getElementById('channelModal').addEventListener('click', (e) => {
-            if (e.target.classList.contains('modal')) closeModal();
-        });
+        // (Old channelModal code removed - now using showModal-based showChannelDetail at line ~5235)
+        // ============================================================
 
         // Helpers
         function formatNumber(num) {
