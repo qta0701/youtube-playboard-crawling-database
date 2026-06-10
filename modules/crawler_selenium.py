@@ -31,6 +31,37 @@ from selenium_stealth import stealth
 logger = setup_logger('crawler')
 
 
+def _patch_chromedriver_file(driver_path):
+    """
+    ChromeDriver 바이너리에서 셀레늄 자동화 고유 서명 키(cdc_...)를 다른 임의의 문자열로 변환하여
+    구글의 자동화 도구 탐지 엔진을 회피합니다. (Windows 시스템에서 정상 보장)
+    """
+    if not driver_path or not os.path.exists(driver_path):
+        return
+    
+    try:
+        # 바이너리 읽기
+        with open(driver_path, 'rb') as f:
+            content = f.read()
+            
+        # 셀레늄 고유 서명 타겟 바이트 (보통 cdc_adoQpoasnfa76pfcZLmcfl_ 로 시작함)
+        target = b"cdc_adoQpoasnfa76pfcZLmcfl_"
+        if target in content:
+            logger.info(f"[Driver Patch] 구글 로그인 차단 우회를 위해 ChromeDriver 바이너리 패치 시도: {driver_path}")
+            # 원본 크기와 동일한 대체 바이트 (길이가 달라지면 바이너리 실행 불가)
+            replacement = b"abc_adoQpoasnfa76pfcZLmcfl_"
+            patched_content = content.replace(target, replacement)
+            
+            # 바이너리 쓰기
+            with open(driver_path, 'wb') as f:
+                f.write(patched_content)
+            logger.info("✓ [Driver Patch] ChromeDriver 바이너리 패치 성공! 구글 자동화 탐지 키가 무력화되었습니다.")
+        else:
+            logger.debug("[Driver Patch] ChromeDriver 서명이 이미 패치되어 있거나 발견되지 않았습니다.")
+    except Exception as e:
+        logger.warning(f"⚠ [Driver Patch] ChromeDriver 바이너리 패치 중 실패 (실행 중인 락 등의 이유): {e}")
+
+
 # play_completion_sound는 utils.py의 play_sound()로 대체됨 (PLAN.md 4.1)
 
 
@@ -183,7 +214,9 @@ class PlayboardCrawler:
             if not driver_initialized:
                 try:
                     logger.info("Attempting to download and install ChromeDriver with webdriver-manager...")
-                    service = Service(ChromeDriverManager().install())
+                    driver_path = ChromeDriverManager().install()
+                    _patch_chromedriver_file(driver_path)
+                    service = Service(driver_path)
                     self.driver = webdriver.Chrome(service=service, options=chrome_options)
                     logger.info("✓ ChromeDriver initialized with webdriver-manager")
                     driver_initialized = True
@@ -194,6 +227,10 @@ class PlayboardCrawler:
             if not driver_initialized:
                 try:
                     logger.debug("Attempting to use ChromeDriver from system PATH...")
+                    import shutil
+                    sys_driver_path = shutil.which("chromedriver")
+                    if sys_driver_path:
+                        _patch_chromedriver_file(sys_driver_path)
                     self.driver = webdriver.Chrome(options=chrome_options)
                     logger.info("✓ ChromeDriver initialized from system PATH")
                     driver_initialized = True
@@ -206,6 +243,7 @@ class PlayboardCrawler:
                     local_driver_path = "chromedriver.exe"
                     if os.path.exists(local_driver_path):
                         logger.debug(f"Attempting to use local ChromeDriver: {local_driver_path}")
+                        _patch_chromedriver_file(local_driver_path)
                         service = Service(local_driver_path)
                         self.driver = webdriver.Chrome(service=service, options=chrome_options)
                         logger.info("✓ ChromeDriver initialized from project directory")
@@ -219,20 +257,23 @@ class PlayboardCrawler:
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
-            # 봇 탐지 우회 설정 (selenium-stealth 적용)
-            try:
-                stealth(
-                    self.driver,
-                    languages=["ko-KR", "ko"],
-                    vendor="Google Inc.",
-                    platform="Win32",
-                    webgl_vendor="Intel Inc.",
-                    renderer="Intel Iris OpenGL Engine",
-                    fix_hairline=True,
-                )
-                logger.info("✓ selenium-stealth successfully applied for bot bypass")
-            except Exception as e:
-                logger.warning(f"Failed to apply selenium-stealth: {e}")
+            # 봇 탐지 우회 설정 (selenium-stealth 비활성화)
+            # 구글 로그인 차단 회피를 위해 stealth를 비활성화합니다. 
+            # stealth가 주입한 모킹 지문들의 불일치 흔적 때문에 구글 로그인 엔진에 봇으로 탐지됩니다.
+            # 대신 chromedriver 바이너리 레벨에서 cdc 키를 패치하므로 봇 탐지를 우회할 수 있습니다.
+            # try:
+            #     stealth(
+            #         self.driver,
+            #         languages=["ko-KR", "ko"],
+            #         vendor="Google Inc.",
+            #         platform="Win32",
+            #         webgl_vendor="Intel Inc.",
+            #         renderer="Intel Iris OpenGL Engine",
+            #         fix_hairline=True,
+            #     )
+            #     logger.info("✓ selenium-stealth successfully applied for bot bypass")
+            # except Exception as e:
+            #     logger.warning(f"Failed to apply selenium-stealth: {e}")
 
         # 추가 WebDriver 마스킹 스크립트 실행
         try:
