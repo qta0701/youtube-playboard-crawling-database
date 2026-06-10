@@ -127,11 +127,18 @@ def find_existing_batch_file(base_dir, target_type, category, country, period, c
     # 정규식 패턴: 
     # criteria가 명시된 경우: {target}_{optional batch_}{category}_{country}_{period}_{criteria}_*.csv
     # criteria가 없는 경우: {target}_{optional batch_}{category}_{country}_{period}_*.csv (하위 호환성)
+    # 하위 호환성 추가: criteria가 '조회수 순위'인 경우, 파일명에 criteria가 생략된 기존 파일도 매칭할 수 있도록 합니다.
     if safe_criteria:
-        pattern_regex = re.compile(
-            rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_{re.escape(safe_criteria)}_.+\.csv$",
-            re.IGNORECASE
-        )
+        if safe_criteria in ['조회수 순위', '조회수_순위', '조회수']:
+            pattern_regex = re.compile(
+                rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_(?:{re.escape(safe_criteria)}_)?.+\.csv$",
+                re.IGNORECASE
+            )
+        else:
+            pattern_regex = re.compile(
+                rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_{re.escape(safe_criteria)}_.+\.csv$",
+                re.IGNORECASE
+            )
     else:
         pattern_regex = re.compile(
             rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_.+\.csv$",
