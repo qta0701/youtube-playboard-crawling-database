@@ -16,7 +16,7 @@ if %errorlevel% equ 0 (
     goto find_port
 )
 
-title YouTube DB Dashboard & Crawler (Port %PORT%)
+title 유튜브 대시보드 크롤러 (Port %PORT%)
 cd /d "%~dp0"
 
 echo ===================================================
@@ -77,10 +77,10 @@ if not exist google_service_key mkdir google_service_key
 
 :: Run the Streamlit application with fallback support
 echo [INFO] Starting Streamlit Application on Port %PORT%...
-streamlit run app.py --server.port %PORT% 2>nul
+streamlit run app.py --server.port %PORT%
 if %errorlevel% neq 0 (
     echo [WARNING] Direct 'streamlit' command failed. Trying python module call...
-    python -m streamlit run app.py --server.port %PORT% 2>nul
+    python -m streamlit run app.py --server.port %PORT%
     if %errorlevel% neq 0 (
         echo [WARNING] Venv Python streamlit failed. Trying global python...
         deactivate 2>nul

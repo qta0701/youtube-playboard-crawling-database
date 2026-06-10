@@ -213,7 +213,7 @@ def ensure_directory_exists(directory_path):
         return False
 
 
-def generate_safe_filepath(base_dir, target_type, category, country, period, extension='csv'):
+def generate_safe_filepath(base_dir, target_type, category, country, period, criteria=None, extension='csv'):
     """
     안전한 파일 경로 생성
 
@@ -223,6 +223,7 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, ext
         category (str): 카테고리
         country (str): 국가
         period (str): 기간
+        criteria (str, optional): 수집 기준 (예: 조회수 순위, 좋아요 순위, 댓글 순위)
         extension (str): 확장자 (기본값: 'csv')
 
     Returns:
@@ -258,7 +259,11 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, ext
     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
 
     # 파일명 생성
-    filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{timestamp}.{extension}"
+    if criteria:
+        safe_criteria = sanitize_filename(criteria)
+        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{safe_criteria}_{timestamp}.{extension}"
+    else:
+        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{timestamp}.{extension}"
 
     # 전체 경로 (날짜별 폴더 내부에 저장)
     filepath = os.path.join(target_dir, filename)

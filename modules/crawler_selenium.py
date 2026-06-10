@@ -122,6 +122,20 @@ class PlayboardCrawler:
 
     def _init_driver(self):
         """Chrome WebDriver 초기화 (초기화 락, 랜덤 디버깅 포트, 백그라운드 최적화)"""
+        if self.driver is not None:
+            try:
+                # 드라이버 세션 확인
+                _ = self.driver.current_url
+                logger.info("Existing Chrome session is active. Reusing driver.")
+                return
+            except Exception:
+                logger.info("Existing Chrome session is invalid. Quit and re-initialize.")
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+
         # [원칙] 네이버/플레이보드 보안 감지 회피 및 디버깅을 용이하게 하기 위해 GUI 모드(headless=False) 실행을 우선합니다.
         profile_path = get_chrome_profile_path()
         logger.info(f"Using Chrome profile path: {profile_path}")
@@ -134,6 +148,11 @@ class PlayboardCrawler:
         debug_port = random.randint(9300, 9500)
         chrome_options.add_argument(f"--remote-debugging-port={debug_port}")
         logger.info(f"Allocated Chrome remote debugging port: {debug_port}")
+
+        # Gpu 및 UI 렌더링 관련 불필요한 시스템 에러 로그 및 개발자 도구 수신 포트 정보 콘솔 출력 방지
+        chrome_options.add_argument('--log-level=3')
+        chrome_options.add_argument('--silent')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
@@ -291,11 +310,9 @@ class PlayboardCrawler:
 
     def _scroll_to_load_items(self, target_count=100, max_attempts=None):
         """
-        무한 스크롤로 아이템 로딩 (Optimized JavaScript Scrolling - PLAN.md Phase 1.3)
-
-        Args:
-            target_count (int): 목표 아이템 수
-            max_attempts (int): 최대 스크롤 시도 횟수
+        무한 스크롤로 아이템 로딩 (Optimized JavaScript Scrolling)
+        - div.current 순위 텍스트 최댓값을 분석하여 target_count 도달 여부 판정
+        - 비로그인 모드 수집 도중 로그인 팝업(login wall) 발견 시 사용자 알림 및 조기 중단
         """
         if max_attempts is None:
             max_attempts = Config.MAX_SCROLL_ATTEMPTS
@@ -314,6 +331,19 @@ class PlayboardCrawler:
                 logger.warning("🛑 [System] 스크롤 루프 도중 프로세스 중단 요청이 감지되었습니다. 스크롤을 즉시 중단합니다.")
                 break
 
+            # 2. 로그인 벽 감지 (로그인 팝업이 떴는지 모니터링)
+            if self._check_login_wall():
+                logger.warning("⚠ [Scroll] 로그인 팝업(Login Wall)이 감지되었습니다. 크롤링을 조기 중단하고 사용자에게 알림을 발송합니다.")
+                try:
+                    play_notification_sound()
+                    show_notification(
+                        f"[워커 {self.worker_id}번 브라우저] 로그인 요구 팝업 감지",
+                        "크롤링 중 로그인 팝업이 감지되었습니다. 수집이 조기 중단되며 수집 완료 처리됩니다."
+                    )
+                except Exception as alert_err:
+                    logger.warning(f"Failed to trigger login wall notification: {alert_err}")
+                break
+
             # 백그라운드 상태(최소화 등) 모니터링
             try:
                 is_hidden = self.driver.execute_script("return document.hidden;")
@@ -329,11 +359,28 @@ class PlayboardCrawler:
             # 마지막 요소를 찾아서 화면 중앙에 위치시켜 Lazy Loading 트리거
             try:
                 rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.chart__row")
-                current_count = len(rows)
+                
+                # div.current 순위 텍스트 직접 감지하여 최대 순위 도출
+                current_count = 0
+                try:
+                    rank_elements = self.driver.find_elements(By.CSS_SELECTOR, "div.current")
+                    ranks = []
+                    for el in rank_elements:
+                        txt = el.text.strip()
+                        if txt.isdigit():
+                            ranks.append(int(txt))
+                    if ranks:
+                        current_count = max(ranks)
+                        logger.debug(f"[Scroll] Current max rank by elements: {current_count}")
+                    else:
+                        current_count = len(rows)
+                except Exception as rank_err:
+                    logger.debug(f"Failed to parse ranks via element text: {rank_err}")
+                    current_count = len(rows)
 
                 # 목표 달성 시 즉시 종료
                 if current_count >= target_count:
-                    logger.info(f"Target reached: {current_count} items")
+                    logger.info(f"Target reached: Rank {current_count} matches or exceeds target {target_count}")
                     return current_count
 
                 if rows and len(rows) > 0:
@@ -344,7 +391,6 @@ class PlayboardCrawler:
                     except:
                         pass
 
-                    # [PLAN.md Phase 1.3.B] ActionChains 제거 -> Pure JavaScript 스크롤
                     # Lazy Loading 트리거를 위해 약간 더 내림
                     self.driver.execute_script("window.scrollBy(0, 300);")
                 else:
@@ -358,11 +404,11 @@ class PlayboardCrawler:
             # 이전 개수보다 늘어날 때까지 최대 3초 대기 (늘어나면 즉시 탈출)
             try:
                 WebDriverWait(self.driver, 3).until(
-                    lambda d: len(d.find_elements(By.CSS_SELECTOR, "tr.chart__row")) > current_count
+                    lambda d: len(d.find_elements(By.CSS_SELECTOR, "tr.chart__row")) > len(rows)
                 )
                 # 아이템이 늘어났으면 바로 다음 루프로 (속도 향상)
                 new_count = len(self.driver.find_elements(By.CSS_SELECTOR, "tr.chart__row"))
-                logger.info(f"[Scroll] Loaded: {current_count} -> {new_count} items")
+                logger.info(f"[Scroll] Loaded rows count: {len(rows)} -> {new_count}")
                 items_loaded = current_count
                 no_change_count = 0
                 attempts += 1
@@ -371,45 +417,72 @@ class PlayboardCrawler:
                 # 3초 동안 안 늘어나면 Wiggle 시도
                 pass
 
-            # 현재 로드된 아이템 수 확인
+            # 현재 로드된 실제 순위 최댓값 확인
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            items = soup.select('table.sheet tbody tr.chart__row')
-            if not items:
-                items = soup.find_all('tr', class_='rank-item')
-            if not items:
-                items = soup.select('tbody tr')
-
-            new_items_loaded = len(items)
-            logger.info(f"Scroll {attempts + 1}: Items loaded: {new_items_loaded}/{target_count}")
+            current_ranks = []
+            
+            # td.rank 내 div.current 또는 일반 div.current 파싱
+            rank_divs = soup.select('td.rank div.current')
+            if not rank_divs:
+                rank_divs = soup.select('div.current')
+                
+            for d in rank_divs:
+                text_val = d.get_text(strip=True)
+                if text_val.isdigit():
+                    current_ranks.append(int(text_val))
+                    
+            if current_ranks:
+                new_items_loaded = max(current_ranks)
+                logger.info(f"Scroll {attempts + 1}: Max rank loaded: {new_items_loaded}/{target_count}")
+            else:
+                # Fallback: 행 개수 기준 카운팅
+                items = soup.select('table.sheet tbody tr.chart__row')
+                if not items:
+                    items = soup.select('tbody tr')
+                new_items_loaded = len(items)
+                logger.info(f"Scroll {attempts + 1}: Items loaded (rows count fallback): {new_items_loaded}/{target_count}")
 
             # 목표 달성 확인
             if new_items_loaded >= target_count:
                 logger.info(f"Target reached: {new_items_loaded} items")
                 break
 
-            # 변화 확인 (아이템 수 기준)
+            # 이전 수집 상태와 변화 없음 감지
             if new_items_loaded == items_loaded:
                 no_change_count += 1
-
-                # [PLAN.md Phase 2.2] 로그인 월 감지 (20~22개 구간)
                 if new_items_loaded >= 20 and new_items_loaded <= 25 and no_change_count >= 2:
                     login_wall_detected = self._check_login_wall()
                     if login_wall_detected:
                         logger.warning("=" * 80)
                         logger.warning("⚠ LOGIN WALL DETECTED: '로그인하여 더 보기' 버튼 또는 팝업 발견")
-                        logger.warning(f"비로그인 상태에서는 {new_items_loaded}개까지만 수집 가능합니다.")
-                        logger.warning("100개 이상 수집하려면 login_mode=True로 설정하세요.")
+                        logger.warning("크롤링 중 로그인 팝업이 감지되었습니다. 수집이 조기 중단되며 수집 완료 처리됩니다.")
                         logger.warning("=" * 80)
+                        try:
+                            play_notification_sound()
+                            show_notification(
+                                f"[워커 {self.worker_id}번 브라우저] 로그인 요구 팝업 감지",
+                                "비로그인 상태로 크롤링 중 로그인 팝업이 감지되었습니다. 계속 수집하려면 로그인 모드를 활성화하세요."
+                            )
+                        except Exception as alert_err:
+                            logger.warning(f"Failed to trigger login wall notification: {alert_err}")
                         break
 
                 # [PLAN.md Phase 1.3.B] Wiggle Scrolling (JavaScript 사용)
-                # 변화가 없으면 Wiggle (위로 살짝 올렸다가 내림)
+                # 3회 연속 변화 없음 시 (동일 개수 4회 반복) Wiggle 및 브라우저 강제 포커싱을 통해 백그라운드 스로틀링 해제
                 if no_change_count >= 3:
                     logger.info(f"[Scroll] Wiggle attempt at {new_items_loaded} items (no_change: {no_change_count})...")
                     self.driver.execute_script("window.scrollBy(0, -200);")
                     self.random_delay(0.1, 0.3)
                     self.driver.execute_script("window.scrollBy(0, 200);")
                     self.random_delay(0.4, 0.7)
+
+                    logger.info(f"[Scroll] {no_change_count}회 연속 로딩 정체 감지. 백그라운드 지연 해제를 위해 브라우저 강제 포커싱 시도...")
+                    try:
+                        self.driver.switch_to.window(self.driver.current_window_handle)
+                        self.driver.execute_script("window.focus();")
+                        logger.info("✓ [Scroll] 브라우저 창을 포커싱 완료했습니다.")
+                    except Exception as focus_err:
+                        logger.debug(f"Failed to focus browser window: {focus_err}")
 
                 # [PLAN.md Phase 1.3.B] 10회 연속 변화 없음 시 중단
                 if no_change_count >= 10:
@@ -439,38 +512,89 @@ class PlayboardCrawler:
         except:
             return False
 
-    def _wait_for_login(self, max_wait_time=120):
+    def _check_login_status_by_element(self):
+        """
+        사용자가 제시한 구체적인 요소를 기반으로 로그인 성공 여부를 정밀 판정합니다.
+        Returns:
+            bool: 로그인에 성공한 상태이면 True, 로그인이 필요한 상태이면 False
+        """
+        try:
+            # 1. 미로그인 상태 마커 요소(로그인 유도 버튼)를 최우선으로 검사
+            # 해당 요소들이 하나라도 노출되고 있으면 무조건 비로그인 상태(False)로 간주합니다.
+            signin_selectors = [
+                "div.menu__item--signin",
+                "a[href*='/account/signin']",
+                "a[data-interaction-type='clickSignin']"
+            ]
+            for sel in signin_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in elements:
+                    if el.is_displayed():
+                        logger.debug(f"[Login Check] Visible sign-in element found: {sel}. User is NOT logged in.")
+                        return False
+
+            # XPath를 이용해 텍스트가 '로그인'인 링크도 검사
+            login_buttons = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/account/signin') and contains(text(), '로그인')]")
+            for btn in login_buttons:
+                if btn.is_displayed():
+                    logger.debug("[Login Check] Visible login button found via XPath. User is NOT logged in.")
+                    return False
+
+            # 2. 로그인 성공 표시 요소가 존재하는지 검사
+            signed_indicators = [
+                "div.menu.menu--signed",
+                "div.menu__item.menu__picture"
+            ]
+            # 비로그인 상태에서도 오인되기 쉬운 단순 'div.profile-image' 대신 명확한 세션 서브셋만 우선 검사
+            for sel in signed_indicators:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if elements:
+                    logger.debug(f"[Login Check] Found login success indicator element: {sel}")
+                    return True
+
+            # profile-image도 확인하되, 미로그인 요소를 통과한 뒤에만 보조적으로 검사
+            profile_images = self.driver.find_elements(By.CSS_SELECTOR, "div.profile-image")
+            if profile_images:
+                logger.debug("[Login Check] Found profile-image element (fallback check). Assuming logged in.")
+                return True
+
+            # 기본적으로 미로그인 마커 요소가 보이지 않으면 로그인 완료로 판단
+            logger.debug("[Login Check] No login elements visible. Assuming logged in.")
+            return True
+        except Exception as e:
+            logger.warning(f"Error checking login status by element: {e}")
+            return self._check_login_status_quick()
+
+    def _wait_for_login(self, max_wait_time=3600):
         """
         로그인 대기 및 완료 감지 (수동 재개 및 프로세스 중단 연동)
-
-        Args:
-            max_wait_time (int): 최대 대기 시간 (초)
+        - 자동 진행 타임아웃 대신 사용자가 수동 재개를 클릭할 때까지 무한 대기 (최대 1시간 지정)
+        - 실제 로그인 상태 검증 요소를 정밀 판별하여 대기
         """
         logger.info("=" * 60)
-        logger.info("[로그인 모드] 브라우저에서 Playboard에 로그인해주세요!")
-        logger.info(f"최대 대기 시간: {max_wait_time}초")
-        logger.info("로그인 완료 후 자동으로 감지되거나, '수동 재개' 버튼을 눌러 즉시 진행할 수 있습니다.")
+        logger.info("[로그인 모드] 로그인 여부를 검증하고 있습니다...")
         logger.info("=" * 60)
 
-        # OS 알림음 재생 및 알림 메시지 노출
+        # 1. 사전 상태 검사: 이미 로그인된 상태이면 대기하지 않고 진행
+        if self._check_login_status_by_element():
+            logger.info("✓ [로그인 모드] 이미 로그인된 세션이 확인되었습니다. 크롤링을 즉시 시작합니다.")
+            return True
+
+        logger.warning("⚠ [로그인 모드] 로그인 정보가 확인되지 않았습니다. 사용자 로그인이 필요합니다.")
+        logger.info("[안내] 브라우저에서 구글 로그인을 진행하신 후, 대시보드에서 '수동 재개' 버튼을 클릭해 주세요.")
+
+        # OS 알림음 재생 및 알림 메시지 노출 (Speech Off.wav 탑재)
         try:
             play_notification_sound()
             show_notification(
                 f"[워커 {self.worker_id}번 브라우저] 로그인 대기 요구",
-                f"Playboard 로그인 상태를 감지하지 못했습니다. 브라우저에서 로그인을 완료해주세요."
+                "구글 로그인 세션이 필요합니다. 브라우저에서 로그인을 완료한 후 대시보드에서 '수동 재개'를 눌러주세요."
             )
         except Exception as alert_err:
             logger.warning(f"Failed to trigger login notification: {alert_err}")
 
         start_time = time.time()
-        check_interval = 10  # 10초마다 자동 스크롤 테스트
-
-        # 첫 번째 확인 전 대기하되, 0.5초 간격으로 중단 요청 확인
-        for _ in range(10):
-            if self.stop_requested:
-                logger.warning("🛑 [System] 로그인 대기 시작 중 프로세스 중단 요청이 감지되었습니다.")
-                return False
-            time.sleep(0.5)
+        last_log_time = time.time()
 
         while time.time() - start_time < max_wait_time:
             # 1. 중단 플래그 검사
@@ -546,7 +670,7 @@ class PlayboardCrawler:
 
         return 'N/A'
 
-    def crawl(self, url, target_type='shorts', login_mode=False, target_count=None, country='한국', period='일간', ranking_date=None):
+    def crawl(self, url, target_type='shorts', login_mode=False, target_count=None, country='한국', period='일간', ranking_date=None, ranking_criteria='조회수 순위', start_rank=0, keep_open=False, category='전체'):
         """
         통합 크롤링 메서드
 
@@ -573,13 +697,12 @@ class PlayboardCrawler:
             logger.info(f"Starting crawl: {url}")
             logger.info(f"Target type: {target_type}, Login: {login_mode}, Count: {target_count}")
 
-            # [PLAN.md Phase 2.1] Target Count 기반 로그인 체크
+            # 비로그인 대용량 수집 정보 안내
             if target_count > 40 and not login_mode:
-                logger.warning("=" * 80)
-                logger.warning("⚠ WARNING: 비로그인 상태에서는 최대 40개까지만 수집될 수 있습니다.")
-                logger.warning(f"요청 수량: {target_count}개, 예상 수집 가능: 최대 40개")
-                logger.warning("100개 이상 수집을 원하시면 login_mode=True로 설정하세요.")
-                logger.warning("=" * 80)
+                logger.info("=" * 80)
+                logger.info(f"💡 [안내] 비로그인 모드로 {target_count}개 수집을 시도합니다.")
+                logger.info("수집 도중 로그인 유도 팝업이 노출될 경우 수집이 조기 중단될 수 있습니다.")
+                logger.info("=" * 80)
 
             if self.stop_requested:
                 logger.warning("🛑 [System] 크롤링 기동 직전 중단 요청이 감지되었습니다.")
@@ -596,6 +719,26 @@ class PlayboardCrawler:
                 self._wait_for_login()
                 if self.stop_requested:
                     return pd.DataFrame()
+
+            # 탭 클릭을 통한 수집 기준 변경 (조회수 순위, 좋아요 순위, 댓글 순위)
+            # 채널 랭킹은 탭 목록이 다르거나 없을 수 있으므로 video/shorts 일 때만 동작
+            if target_type != 'channel' and ranking_criteria:
+                logger.info(f"[Criteria] 수집 기준 변경 시도: {ranking_criteria}")
+                try:
+                    # 앞뒤 공백이 존재할 수 있으므로 contains 매칭 활용
+                    xpath = f"//li[contains(@class, 'item')]//span[contains(text(), '{ranking_criteria}')]"
+                    tab_element = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, xpath))
+                    )
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tab_element)
+                    self.random_delay(0.5, 1.0)
+                    self.driver.execute_script("arguments[0].click();", tab_element)
+                    logger.info(f"✓ [Criteria] 수집 기준을 '{ranking_criteria}'(으)로 전환 완료했습니다.")
+                    
+                    # 탭 전환 후 데이터 갱신을 위해 대기
+                    self.random_delay(2.0, 3.0)
+                except Exception as tab_err:
+                    logger.warning(f"⚠ [Criteria] 수집 기준 탭 '{ranking_criteria}' 전환 실패 (기본 설정으로 구동될 수 있음): {tab_err}")
 
             # 스크롤하여 데이터 로드
             items_loaded = self._scroll_to_load_items(target_count)
@@ -624,9 +767,9 @@ class PlayboardCrawler:
 
             # 타겟 타입에 따라 다른 파싱 메서드 호출
             if target_type == 'channel':
-                data = self._parse_channels(soup, target_count, country, period, ranking_date)
+                data = self._parse_channels(soup, target_count, country, period, ranking_date, start_rank, category, ranking_criteria)
             else:  # shorts or video
-                data = self._parse_videos(soup, target_count, target_type, country, period, ranking_date)
+                data = self._parse_videos(soup, target_count, target_type, country, period, ranking_date, start_rank, category, ranking_criteria)
 
             df = pd.DataFrame(data)
 
@@ -667,10 +810,34 @@ class PlayboardCrawler:
             play_sound()
             raise
         finally:
-            if self.driver:
-                self.driver.quit()
+            if not keep_open:
+                if self.driver:
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass
+                    self.driver = None
 
-    def _parse_videos(self, soup, target_count, video_type='shorts', country='한국', period='일간', ranking_date=None):
+    def close(self):
+        """WebDriver 세션 종료"""
+        if self.driver:
+            try:
+                self.driver.quit()
+                logger.info("Chrome WebDriver closed successfully.")
+                try:
+                    play_sound()
+                    show_notification(
+                        "유튜브 대시보드 크롤러 완료",
+                        "모든 크롤링 수집 프로세스가 완료되어 브라우저가 안전하게 종료되었습니다."
+                    )
+                except Exception as notify_err:
+                    logger.debug(f"Failed to send completion notification: {notify_err}")
+            except Exception as e:
+                logger.warning(f"Failed to close Chrome WebDriver: {e}")
+            finally:
+                self.driver = None
+
+    def _parse_videos(self, soup, target_count, video_type='shorts', country='한국', period='일간', ranking_date=None, start_rank=0, category='전체', ranking_criteria='조회수 순위'):
         """
         쇼츠/영상 데이터 파싱 (광고 섹션 클릭 방지 및 오류 수정 버전)
         """
@@ -693,7 +860,7 @@ class PlayboardCrawler:
         collected_count = 0
         
         # [수정 2] target_count만큼만 반복 (광고가 이미 제외되었으므로 순수 데이터만 처리)
-        for idx, row in enumerate(rows[:target_count], 1):
+        for idx, row in enumerate(rows[start_rank:target_count], start_rank + 1):
             try:
                 # [수정 3] 삭제된 로직: self.driver.execute_script(...)
                 # 이유: 'row' 변수는 BeautifulSoup의 Tag 객체입니다. 
@@ -732,17 +899,29 @@ class PlayboardCrawler:
                     else:
                         rank_change = fluc_text if fluc_text else '0'
 
+                # [버그 수정 및 기능 개선] Video ID 정밀 추출
+                video_id = 'N/A'
+                video_link = row.find('a', href=lambda x: x and ('watch?v=' in x or '/video/' in x or '/shorts/' in x or '/videos/' in x))
+                if video_link:
+                    href = video_link.get('href', '')
+                    from modules.utils import extract_video_id_from_url
+                    video_id = extract_video_id_from_url(href)
+                    if not video_id:
+                        match = re.search(r'([a-zA-Z0-9_-]{11})', href)
+                        if match:
+                            video_id = match.group(1)
+                    if not video_id:
+                        video_id = 'N/A'
+
                 # 3. 제목 (td.title .title__label h3) - 해시태그 제외
                 video_title = 'N/A'
                 title_elem = row.select_one('td.title .title__label h3')
                 if title_elem:
                     video_title = title_elem.get_text(strip=True)
                     video_title = re.sub(r'#\S+', '', video_title).strip()
-                else:
-                    video_link = row.find('a', href=lambda x: x and ('watch?v=' in x or '/videos/' in x or '/shorts/' in x))
-                    if video_link:
-                        video_title = video_link.text.strip()
-                        video_title = re.sub(r'#\S+', '', video_title).strip()
+                elif video_link:
+                    video_title = video_link.text.strip()
+                    video_title = re.sub(r'#\S+', '', video_title).strip()
 
                 # 4. 썸네일 (Lazy Loading 데이터 우선 확보)
                 thumbnail = 'N/A'
@@ -840,22 +1019,33 @@ class PlayboardCrawler:
                 if idx <= 4:
                     logger.debug(f"[Sample #{idx}] Rank: {rank} | Title: {video_title[:30]}... | Channel: {channel_name}")
 
+                # 수집 기준(Criteria)에 따른 동적 메트릭 컬럼 이름 결정
+                metric_col = 'Views'
+                if ranking_criteria == '좋아요 순위':
+                    metric_col = 'Likes'
+                elif ranking_criteria == '댓글 순위':
+                    metric_col = 'Comments'
+
                 # 데이터 적재
-                data.append({
+                item_dict = {
                     'Rank': rank,
                     'Rank Change': rank_change,
                     'Video Title': video_title,
+                    'Video ID': video_id,
                     'Thumbnail': thumbnail,
                     'Channel Name': channel_name,
                     'Subscribers': subscriber_count,
-                    'Views': views,
                     'Upload Date': upload_date,
                     'Tags': tags_str,
                     'Country': country,
+                    'Category': category,
+                    'Criteria': ranking_criteria,
                     'Period': period,
                     'Ranking Date': ranking_date,
                     'Type': video_type
-                })
+                }
+                item_dict[metric_col] = views
+                data.append(item_dict)
 
                 collected_count += 1
                 if collected_count % 10 == 0:
@@ -875,7 +1065,7 @@ class PlayboardCrawler:
 
         return data
 
-    def _parse_channels(self, soup, target_count, country='한국', period='일간', ranking_date=None):
+    def _parse_channels(self, soup, target_count, country='한국', period='일간', ranking_date=None, start_rank=0, category='전체', ranking_criteria='조회수 순위'):
         """
         채널 데이터 파싱 (PLAN.md 3.2.B - nth-child 기반 정밀 파싱)
 
@@ -901,7 +1091,7 @@ class PlayboardCrawler:
         logger.info(f"Found {len(rows)} channel rows for parsing")
 
         collected_count = 0
-        for idx, row in enumerate(rows[:target_count], 1):
+        for idx, row in enumerate(rows[start_rank:target_count], start_rank + 1):
             try:
                 # 광고 필터링
                 if 'chart__row--ad' in row.get('class', []):
@@ -1021,6 +1211,8 @@ class PlayboardCrawler:
                     'Video Count': video_count,
                     'Tags': tags_str,
                     'Country': country,  # PLAN.md 3.5 - 메타 데이터 추가
+                    'Category': category,
+                    'Criteria': ranking_criteria,
                     'Period': period,  # 일간/주간/월간 구분
                     'Ranking Date': ranking_date,  # 랭킹 기준 날짜
                     'Type': 'channel'

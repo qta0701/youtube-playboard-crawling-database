@@ -300,6 +300,10 @@ class DatabaseHandler:
             ('api_channels', 'sync_status', 'TEXT'),
             ('api_channels', 'collected_video_count', 'INTEGER DEFAULT 0'),
             ('api_channels', 'latest_video_upload_date', 'DATE'),
+            
+            # 크롤링 테이블 댓글 컬럼 추가
+            ('shorts_rank', 'comments', 'INTEGER DEFAULT 0'),
+            ('videos_rank', 'comments', 'INTEGER DEFAULT 0'),
 
             # PLAN.md - api_videos 테이블 Deep Data 확장 (2025-12-10)
             ('api_videos', 'video_link', 'TEXT'),  # https://youtu.be/...
@@ -415,6 +419,7 @@ class DatabaseHandler:
 
                 views = parse_count_string(row.get('Views', 0))
                 likes = parse_count_string(row.get('Likes', 0))
+                comments = parse_count_string(row.get('Comments', 0))
                 crawled_at = datetime.now().isoformat()
 
                 # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
@@ -431,7 +436,7 @@ class DatabaseHandler:
                     cursor.execute('''
                         UPDATE shorts_rank SET
                             title = ?, thumbnail_url = ?, channel_name = ?, channel_id = ?,
-                            views = ?, likes = ?, rank = ?, rank_change = ?, upload_date = ?,
+                            views = ?, likes = ?, comments = ?, rank = ?, rank_change = ?, upload_date = ?,
                             subscriber_count = ?, tags = ?, updated_at = ?, crawled_at = ?
                         WHERE id = ?
                     ''', (
@@ -441,6 +446,7 @@ class DatabaseHandler:
                         row.get('Channel ID', 'N/A'),
                         views,
                         likes,
+                        comments,
                         row.get('Rank', 0),
                         row.get('Rank Change', 'N/A'),
                         row.get('Upload Date', 'N/A'),
@@ -456,10 +462,10 @@ class DatabaseHandler:
                     cursor.execute('''
                         INSERT INTO shorts_rank (
                             video_id, title, thumbnail_url, channel_name, channel_id,
-                            views, likes, rank, rank_change, upload_date, subscriber_count, tags,
+                            views, likes, comments, rank, rank_change, upload_date, subscriber_count, tags,
                             category, country, period, crawled_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         video_id,
                         row.get('Video Title', 'N/A'),
@@ -468,6 +474,7 @@ class DatabaseHandler:
                         row.get('Channel ID', 'N/A'),
                         views,
                         likes,
+                        comments,
                         row.get('Rank', 0),
                         row.get('Rank Change', 'N/A'),
                         row.get('Upload Date', 'N/A'),
@@ -511,6 +518,7 @@ class DatabaseHandler:
 
                 views = parse_count_string(row.get('Views', 0))
                 likes = parse_count_string(row.get('Likes', 0))
+                comments = parse_count_string(row.get('Comments', 0))
                 crawled_at = datetime.now().isoformat()
 
                 # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
@@ -552,10 +560,10 @@ class DatabaseHandler:
                     cursor.execute('''
                         INSERT INTO videos_rank (
                             video_id, title, thumbnail_url, channel_name, channel_id,
-                            views, likes, rank, rank_change, upload_date, subscriber_count, tags,
+                            views, likes, comments, rank, rank_change, upload_date, subscriber_count, tags,
                             category, country, period, crawled_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         video_id,
                         row.get('Video Title', 'N/A'),
@@ -564,6 +572,7 @@ class DatabaseHandler:
                         row.get('Channel ID', 'N/A'),
                         views,
                         likes,
+                        comments,
                         row.get('Rank', 0),
                         row.get('Rank Change', 'N/A'),
                         row.get('Upload Date', 'N/A'),

@@ -1,0 +1,22 @@
+{
+    "crawl_target": "shorts",
+    "crawl_batch": true,
+    "crawl_cat": "전체",
+    "crawl_country": "한국",
+    "crawl_period": "일간",
+    "crawl_use_date": false,
+    "crawl_date_val": "2026-06-10",
+    "crawl_login": true,
+    "crawl_limit": 100,
+    "crawl_criteria": "조회수 순위",
+    "search_keyword_val": "",
+    "search_source_val": "전체",
+    "search_type_val": "전체",
+    "search_view_min": 0,
+    "search_view_max": 1000000000,
+    "search_date_from": "2020-01-01",
+    "search_date_to": "2026-06-10",
+    "search_sort_by": "최근 등록일순",
+    "sync_channel_url": "https://www.youtube.com/@ebsdocumentary",
+    "sync_limit_video": 50
+}
