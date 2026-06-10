@@ -159,7 +159,6 @@ class PlayboardCrawler:
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         chrome_options.add_argument(f"--user-data-dir={profile_path}")
 
         # 백그라운드 구동 스로틀링 완전 비활성화 (최소화 상태에서도 속도 지연 방지)
@@ -565,10 +564,11 @@ class PlayboardCrawler:
             logger.warning(f"Error checking login status by element: {e}")
             return self._check_login_status_quick()
 
-    def _wait_for_login(self, max_wait_time=3600):
+    def _wait_for_login(self, max_wait_time=3600, check_interval=5.0):
         """
         로그인 대기 및 완료 감지 (수동 재개 및 프로세스 중단 연동)
         - 자동 진행 타임아웃 대신 사용자가 수동 재개를 클릭할 때까지 무한 대기 (최대 1시간 지정)
+        - 플레이보드 로그인 페이지로 바로 이동하여 직접 로그인 대기
         - 실제 로그인 상태 검증 요소를 정밀 판별하여 대기
         """
         logger.info("=" * 60)
@@ -580,8 +580,18 @@ class PlayboardCrawler:
             logger.info("✓ [로그인 모드] 이미 로그인된 세션이 확인되었습니다. 크롤링을 즉시 시작합니다.")
             return True
 
+        original_url = self.driver.current_url
         logger.warning("⚠ [로그인 모드] 로그인 정보가 확인되지 않았습니다. 사용자 로그인이 필요합니다.")
-        logger.info("[안내] 브라우저에서 구글 로그인을 진행하신 후, 대시보드에서 '수동 재개' 버튼을 클릭해 주세요.")
+        logger.info("[로그인 안내] 플레이보드 로그인 페이지로 전환합니다. 브라우저에서 로그인을 완료한 후 대시보드에서 '수동 재개' 버튼을 클릭해 주세요.")
+
+        # 플레이보드 로그인 페이지 리다이렉트
+        try:
+            login_url = "https://playboard.co/account/signin"
+            logger.info(f"이동 중: {login_url}")
+            self.driver.get(login_url)
+            time.sleep(2)
+        except Exception as redirect_err:
+            logger.warning(f"Failed to redirect to Playboard signin page: {redirect_err}")
 
         # OS 알림음 재생 및 알림 메시지 노출 (Speech Off.wav 탑재)
         try:
@@ -594,7 +604,6 @@ class PlayboardCrawler:
             logger.warning(f"Failed to trigger login notification: {alert_err}")
 
         start_time = time.time()
-        last_log_time = time.time()
 
         while time.time() - start_time < max_wait_time:
             # 1. 중단 플래그 검사
@@ -604,46 +613,34 @@ class PlayboardCrawler:
 
             # 2. 수동 재개 플래그 검사
             if self.resume_requested:
-                logger.info("⏯️ [System] 사용자 수동 재개 요청 감지! 즉시 로그인 상태를 검증합니다.")
+                logger.info("⏯️ [System] 사용자 수동 재개 요청 감지! 플레이보드 페이지로 복귀하여 로그인 상태를 확인합니다.")
                 self.resume_requested = False  # 플래그 초기화
-                if self._check_login_status_quick():
+                
+                try:
+                    # 원래 페이지로 돌아가기
+                    self.driver.get(original_url)
+                    time.sleep(3)
+                except Exception as restore_err:
+                    logger.error(f"Failed to restore original url {original_url}: {restore_err}")
+                
+                # 플레이보드에서 로그인 성공 여부 검사
+                if self._check_login_status_by_element():
                     logger.info("✓ [System] 수동 재개 성공: 로그인이 확인되었습니다.")
                     self.driver.execute_script("window.scrollTo(0, 0);")
                     time.sleep(1)
                     return True
                 else:
-                    logger.warning("⚠ [System] 수동 재개 실패: 아직 로그인이 완료되지 않았거나 데이터 로드가 덜 되었습니다. 대기를 지속합니다.")
+                    logger.warning("⚠ [System] 수동 재개 실패: 아직 로그인이 완료되지 않았거나 세션 로드가 되지 않았습니다. 로그인 페이지로 재이동합니다.")
+                    try:
+                        self.driver.get("https://playboard.co/account/signin")
+                        time.sleep(2)
+                    except:
+                        pass
 
             elapsed = int(time.time() - start_time)
             remaining = max_wait_time - elapsed
 
             logger.info(f"로그인 확인 중... (경과: {elapsed}초, 남은 시간: {remaining}초 / '수동 재개' 가능)")
-
-            try:
-                # 스크롤 테스트로 로그인 유효성 체크
-                body = self.driver.find_element(By.TAG_NAME, 'body')
-                for _ in range(3):
-                    if self.stop_requested:
-                        return False
-                    body.send_keys(Keys.END)
-                    time.sleep(1.0)
-
-                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                rows = soup.select('table.sheet tbody tr.chart__row')
-                if not rows:
-                    rows = soup.select('tbody tr')
-
-                loaded_count = len(rows)
-                logger.info(f"현재 로드된 항목: {loaded_count}개")
-
-                if loaded_count > 30:
-                    logger.info(f"✓ 로그인 자동 감지됨! ({loaded_count}개 로드됨)")
-                    self.driver.execute_script("window.scrollTo(0, 0);")
-                    time.sleep(2)
-                    return True
-
-            except Exception as e:
-                logger.debug(f"로그인 확인 중 오류 (무시됨): {e}")
 
             # check_interval 대기 시, 0.5초 간격으로 쪼개서 중단 요청을 빠르게 폴링
             for _ in range(int(check_interval / 0.5)):
@@ -653,6 +650,11 @@ class PlayboardCrawler:
 
         logger.warning(f"로그인 대기 시간 초과 ({max_wait_time}초)")
         logger.warning("비로그인 상태로 진행합니다. (약 20개만 수집 가능)")
+        try:
+            self.driver.get(original_url)
+            time.sleep(2)
+        except:
+            pass
         return False
 
     def _extract_channel_id(self, href):

@@ -386,6 +386,95 @@ with tabs[0]:
         )
         
         st.markdown("---")
+        
+        # 🔍 크롤링 동작 예측 상태 표시 패널
+        st.subheader("🔍 동작 예측 상태")
+        
+        if not batch_mode:
+            # 단일 카테고리 예측
+            existing_filepath = find_existing_batch_file(
+                base_dir=Config.OUTPUT_DIR,
+                target_type=target_type,
+                category=category,
+                country=country,
+                period=period,
+                criteria=crawl_criteria
+            )
+            
+            already_collected = 0
+            if existing_filepath:
+                try:
+                    already_collected = len(pd.read_csv(existing_filepath))
+                except Exception:
+                    pass
+            
+            if already_collected == 0:
+                st.info(f"📂 **[신규 파일 생성]** 오늘 자 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
+            elif already_collected >= crawl_limit:
+                st.success(f"✓ **[수집 완료 건너뜀]** 이미 **{already_collected}**개가 수집되어 목표치({crawl_limit}개)를 충족했습니다. 크롤링을 건너뜁니다.")
+            else:
+                st.warning(f"🔄 **[기존 파일 채우기]** 이미 **{already_collected}**개가 수집되어 있습니다. 부족한 **{crawl_limit - already_collected}**개를 추가 수집합니다.")
+        else:
+            # 일괄 카테고리 예측
+            all_categories = [cat for cat in CATEGORIES if cat != '전체']
+            batch_records = []
+            new_cats = 0
+            update_cats = 0
+            skip_cats = 0
+            
+            for cat in all_categories:
+                batch_cat_name = f"batch_{cat}"
+                existing_filepath = find_existing_batch_file(
+                    base_dir=Config.OUTPUT_DIR,
+                    target_type=target_type,
+                    category=batch_cat_name,
+                    country=country,
+                    period=period,
+                    criteria=crawl_criteria
+                )
+                
+                already_collected = 0
+                if existing_filepath:
+                    try:
+                        already_collected = len(pd.read_csv(existing_filepath))
+                    except Exception:
+                        pass
+                
+                if already_collected == 0:
+                    status = "📂 신규 생성"
+                    add_count = crawl_limit
+                    new_cats += 1
+                elif already_collected >= crawl_limit:
+                    status = "✓ 완료 건너뜀"
+                    add_count = 0
+                    skip_cats += 1
+                else:
+                    status = "🔄 기존 파일 채우기"
+                    add_count = crawl_limit - already_collected
+                    update_cats += 1
+                    
+                batch_records.append({
+                    "카테고리": cat,
+                    "예측 동작": status,
+                    "현재 수집량": already_collected,
+                    "추가 수집량": add_count
+                })
+            
+            # 요약 표시
+            summary_txt = []
+            if new_cats > 0:
+                summary_txt.append(f"📂 신규 생성: {new_cats}개")
+            if update_cats > 0:
+                summary_txt.append(f"🔄 기존 채우기: {update_cats}개")
+            if skip_cats > 0:
+                summary_txt.append(f"✓ 건너뜀: {skip_cats}개")
+                
+            st.info(f"📋 **일괄 크롤링 예측** ({', '.join(summary_txt)})")
+            
+            with st.expander("🔍 카테고리별 상세 예측 현황 보기", expanded=False):
+                st.dataframe(pd.DataFrame(batch_records), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
         btn_col1, btn_col2, btn_col3 = st.columns(3)
         with btn_col1:
             start_btn = st.button("🚀 크롤링 시작", use_container_width=True, key="crawl_start_btn")
