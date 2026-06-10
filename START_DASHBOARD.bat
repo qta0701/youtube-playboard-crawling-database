@@ -1,148 +1,96 @@
 @echo off
 chcp 65001 >nul
-title YouTube DB Dashboard (Port 5001)
+
+:: Find an available port starting from 8501
+set PORT=8501
+:find_port
+netstat -ano | findstr /R /C:"[.:]%PORT% " >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [WARNING] Port %PORT% is in use. Searching for next port...
+    set /a PORT=%PORT%+1
+    if %PORT% gtr 8600 (
+        echo [ERROR] No available port found between 8501 and 8600.
+        pause
+        exit /b 1
+    )
+    goto find_port
+)
+
+title YouTube DB Dashboard & Crawler (Port %PORT%)
 cd /d "%~dp0"
 
 echo ===================================================
-echo   YouTube DB Dashboard - Port 5001
-echo   Zero-Cost ID Extraction Mode
+echo   YouTube Pro Dashboard - Port %PORT%
 echo ===================================================
 echo.
 
-REM Check virtual environment
-if not exist "venv\Scripts\activate.bat" (
-    echo [ERROR] Virtual environment not found.
-    echo [INFO] Please run start.bat first to setup environment.
-    pause
-    exit /b 1
-)
-
-REM Activate virtual environment
-echo [DEBUG] Activating virtual environment...
-call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment
-    pause
-    exit /b 1
-)
-echo [DEBUG] Virtual environment activated successfully
-
-REM Create required directories
-echo [DEBUG] Creating required directories...
-if not exist "output\db" mkdir "output\db"
-echo [DEBUG] Directories ready
-
-REM Check and install required packages
-echo [DEBUG] Checking required packages...
-
-echo [DEBUG] Checking Flask...
-python -c "import flask" 2>nul
-if errorlevel 1 (
-    echo [INFO] Installing Flask...
-    pip install flask
-    if errorlevel 1 (
-        echo [ERROR] Failed to install Flask
-        pause
-        exit /b 1
-    )
+:: Find python3.14-64.exe dynamically based on rules.md
+set "PYTHON_CMD=python"
+if exist "%USERPROFILE%\AppData\Local\Python\bin\python3.14-64.exe" (
+    set "PYTHON_CMD=%USERPROFILE%\AppData\Local\Python\bin\python3.14-64.exe"
+    echo [INFO] Found Python 3.14 at AppData: %PYTHON_CMD%
 ) else (
-    echo [DEBUG] Flask is already installed
-)
-
-echo [DEBUG] Checking google-api-python-client...
-python -c "from googleapiclient.discovery import build" 2>nul
-if errorlevel 1 (
-    echo [INFO] Installing google-api-python-client...
-    pip install google-api-python-client
-    if errorlevel 1 (
-        echo [ERROR] Failed to install google-api-python-client
-        pause
-        exit /b 1
-    )
-) else (
-    echo [DEBUG] google-api-python-client is already installed
-)
-
-echo [DEBUG] Checking youtube-transcript-api...
-python -c "from youtube_transcript_api import YouTubeTranscriptApi" 2>nul
-if errorlevel 1 (
-    echo [INFO] Installing youtube-transcript-api...
-    pip install youtube-transcript-api
-    if errorlevel 1 (
-        echo [ERROR] Failed to install youtube-transcript-api
-        pause
-        exit /b 1
-    )
-) else (
-    echo [DEBUG] youtube-transcript-api is already installed
-)
-
-echo [DEBUG] All required packages are ready
-
-echo.
-echo ===================================================
-echo   Checking for existing Dashboard process
-echo ===================================================
-
-REM Kill existing Python processes on port 5001
-echo [INFO] Checking for processes on port 5001...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5001 ^| findstr LISTENING') do (
-    echo [INFO] Found process on port 5001 (PID: %%a^), terminating...
-    taskkill /F /PID %%a >nul 2>&1
-    if errorlevel 1 (
-        echo [WARN] Failed to terminate PID %%a
+    where python3.14-64.exe >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "PYTHON_CMD=python3.14-64.exe"
+        echo [INFO] Found Python 3.14 in PATH: %PYTHON_CMD%
     ) else (
-        echo [SUCCESS] Process %%a terminated
+        echo [WARNING] python3.14-64.exe not found. Using default 'python' fallback.
     )
 )
 
-REM Additional safety: kill any dashboard_app.py processes
-echo [INFO] Checking for dashboard_app.py processes...
-tasklist /FI "IMAGENAME eq python.exe" /FO CSV /NH 2>nul | findstr /I "dashboard_app.py" >nul
-if not errorlevel 1 (
-    echo [INFO] Terminating existing dashboard_app.py processes...
-    taskkill /F /IM python.exe /FI "WINDOWTITLE eq *dashboard_app.py*" >nul 2>&1
+:: Check if virtual environment exists
+if not exist venv (
+    echo Virtual environment not found. Creating...
+    "%PYTHON_CMD%" -m venv venv
+    if %errorlevel% neq 0 (
+        echo ERROR: Failed to create virtual environment
+        echo Please ensure Python 3.8+ is installed
+        pause
+        exit /b 1
+    )
+    echo Virtual environment created successfully
 )
 
-REM Force kill ALL python processes using port 5001 (more aggressive)
-echo [INFO] Force killing any remaining processes on port 5001...
-for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr :5001') do (
-    taskkill /F /PID %%a >nul 2>&1
+:: Activate virtual environment
+call venv\Scripts\activate.bat
+
+:: Check if requirements are installed (including undetected_chromedriver, selenium_stealth, streamlit, plotly)
+python -c "import undetected_chromedriver, selenium_stealth, streamlit, plotly" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing required packages...
+    python -m pip install --upgrade pip >nul 2>&1
+    pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo ERROR: Failed to install packages
+        pause
+        exit /b 1
+    )
+    echo Packages installed successfully
 )
 
-REM Wait for port to be released
-echo [INFO] Waiting for port 5001 to be released...
-timeout /t 3 /nobreak >nul
+:: Create necessary directories
+if not exist output mkdir output
+if not exist output\transcripts mkdir output\transcripts
+if not exist logs mkdir logs
+if not exist google_service_key mkdir google_service_key
 
-echo.
-echo ===================================================
-echo   Cleaning up old logs
-echo ===================================================
-if exist logs\*.log del /q logs\*.log
-if exist logs\*.txt del /q logs\*.txt
-echo [INFO] Old logs deleted.
-
-echo.
-echo ===================================================
-echo   Starting Dashboard Server
-echo ===================================================
-echo [INFO] Port: 5001
-echo [INFO] URL: http://localhost:5001
-echo [INFO] Log file: logs\log_START_DASHBOARD_*.log
-echo.
-echo [DEBUG] Opening browser in 3 seconds...
-echo ===================================================
-echo.
-
-REM Open browser after 3 second delay (in background)
-start /b cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:5001"
-
-REM Start dashboard
-python dashboard_app.py
-
-echo.
-echo ===================================================
-echo [INFO] Dashboard stopped.
-echo [INFO] Check logs folder for detailed logs
-echo ===================================================
+:: Run the Streamlit application with fallback support
+echo [INFO] Starting Streamlit Application on Port %PORT%...
+streamlit run app.py --server.port %PORT% 2>nul
+if %errorlevel% neq 0 (
+    echo [WARNING] Direct 'streamlit' command failed. Trying python module call...
+    python -m streamlit run app.py --server.port %PORT% 2>nul
+    if %errorlevel% neq 0 (
+        echo [WARNING] Venv Python streamlit failed. Trying global python...
+        deactivate 2>nul
+        "%PYTHON_CMD%" -m streamlit run app.py --server.port %PORT%
+        if %errorlevel% neq 0 (
+            echo ERROR: Failed to run Streamlit app. Please ensure streamlit is installed.
+            pause
+            exit /b 1
+        )
+    )
+)
 pause
+

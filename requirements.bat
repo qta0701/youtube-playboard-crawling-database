@@ -8,16 +8,31 @@ echo YouTube Crawler Pro - Installation
 echo ========================================
 echo.
 
+:: Find python3.14-64.exe dynamically based on rules.md
+set "PYTHON_CMD=python"
+if exist "%USERPROFILE%\AppData\Local\Python\bin\python3.14-64.exe" (
+    set "PYTHON_CMD=%USERPROFILE%\AppData\Local\Python\bin\python3.14-64.exe"
+    echo [INFO] Found Python 3.14 at AppData: %PYTHON_CMD%
+) else (
+    where python3.14-64.exe >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "PYTHON_CMD=python3.14-64.exe"
+        echo [INFO] Found Python 3.14 in PATH: %PYTHON_CMD%
+    ) else (
+        echo [WARNING] python3.14-64.exe not found. Using default 'python' command.
+    )
+)
+
 :: Check Python installation
 echo [1/8] Checking Python installation...
-python --version >nul 2>&1
+"%PYTHON_CMD%" --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Python is not installed or not in PATH
-    echo Please install Python 3.9+ from https://www.python.org/downloads/
+    echo Please install Python 3.14 from standard channels.
     pause
     exit /b 1
 )
-python --version
+"%PYTHON_CMD%" --version
 echo.
 
 :: Remove old venv if corrupted
@@ -41,7 +56,7 @@ echo [3/8] Creating virtual environment...
 if exist venv (
     echo [INFO] Virtual environment already exists. Skipping...
 ) else (
-    python -m venv venv
+    "%PYTHON_CMD%" -m venv venv
     if %errorlevel% neq 0 (
         echo [ERROR] Failed to create virtual environment
         pause
@@ -98,17 +113,13 @@ if not exist output\transcripts mkdir output\transcripts
 if not exist output\db mkdir output\db
 if not exist logs mkdir logs
 if not exist google_service_key mkdir google_service_key
-if not exist static mkdir static
-if not exist static\js mkdir static\js
-if not exist static\css mkdir static\css
-if not exist templates mkdir templates
 if not exist modules mkdir modules
 echo [SUCCESS] All directories created
 echo.
 
 :: Verify installation
 echo [8/8] Verifying installation...
-python -c "import flask, selenium, pandas, bs4, googleapiclient, youtube_transcript_api; print('[SUCCESS] All required packages are working correctly')"
+python -c "import selenium, pandas, bs4, googleapiclient, youtube_transcript_api, undetected_chromedriver, selenium_stealth, streamlit, plotly; print('[SUCCESS] All required packages are working correctly')"
 if %errorlevel% neq 0 (
     echo [ERROR] Package verification failed
     echo Some packages may not be installed correctly
@@ -122,20 +133,22 @@ echo Installation completed successfully!
 echo ========================================
 echo.
 echo Installed packages:
-echo - Flask 3.0.0 (Web framework)
 echo - Selenium 4.15.2 (Web automation)
 echo - Pandas 2.1.3 (Data processing)
 echo - BeautifulSoup4 4.12.2 (HTML parsing)
 echo - Google API Client 2.108.0 (YouTube Data API)
 echo - YouTube Transcript API 0.6.1
 echo - webdriver-manager 4.0.1 (Automatic ChromeDriver)
+echo - selenium-stealth (Chrome Bot Detection Avoidance)
+echo - undetected-chromedriver 3.5.5 (Legacy Bot Detection Avoidance)
+echo - Streamlit 1.29.0 (Interactive App Dashboard)
+echo - Plotly 5.18.0 (Interactive Charts Library)
 echo - And all dependencies
 echo.
 echo ========================================
 echo You can now run:
 echo ========================================
-echo - START_DASHBOARD.bat  (Dashboard on port 5001)
-echo - start.bat            (Main crawler application)
+echo - START_DASHBOARD.bat  (Dashboard & Crawler on port 8501)
 echo.
 echo Note: ChromeDriver will be automatically downloaded on first run
 echo.

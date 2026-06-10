@@ -13,23 +13,25 @@ logger = setup_logger('utils')
 
 def play_sound():
     """
-    크롤링 완료 시 시스템 알림음 재생 - PLAN.md 3.2
-
-    Windows: MailBeep (시스템 알림음)
-    기타 OS: 시스템 비프음 (fallback)
+    크롤링 완료 시 시스템 알림음 재생 - rules.md 정책 반영
+    윈도우 기본 미디어 경로의 Speech Off.wav를 사용
     """
     try:
         import winsound
-        # Windows 시스템 알림음 (MailBeep)
-        winsound.PlaySound("MailBeep", winsound.SND_ALIAS)
-        logger.info("Completion sound played (MailBeep)")
-    except Exception:
-        # Fallback: 기본 비프음
+        windir = os.environ.get('SystemRoot', 'C:\\Windows')
+        wav_path = os.path.join(windir, 'Media', 'Speech Off.wav')
+        if os.path.exists(wav_path):
+            winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            logger.info(f"Completion sound played ({wav_path})")
+        else:
+            winsound.PlaySound("MailBeep", winsound.SND_ALIAS)
+            logger.info("Completion sound played (MailBeep fallback)")
+    except Exception as e:
         try:
             print('\a')
             logger.info("Completion beep played (fallback)")
         except Exception:
-            logger.debug("Sound playback not available on this system")
+            logger.debug(f"Sound playback not available: {e}")
 
 
 def clean_text(text):
@@ -478,3 +480,58 @@ def get_random_headers():
         'Sec-Fetch-Site': 'none',
         'Cache-Control': 'max-age=0'
     }
+
+
+def get_chrome_profile_path(subdir="playboard"):
+    """
+    다른 PC 환경 간 이식성 보장을 위한 크롬 프로필 로컬 C 드라이브 리다이렉션 경로 반환
+    """
+    home = os.path.expanduser("~")
+    profile_dir = os.path.join(home, ".adsense_auto_workflow", "chrome_profiles", subdir)
+    os.makedirs(profile_dir, exist_ok=True)
+    return os.path.abspath(profile_dir)
+
+
+def show_notification(title, message):
+    """
+    Windows OS 팝업 알림 띄우기 (PowerShell 활용하여 외부 라이브러리 의존성 없음)
+    """
+    try:
+        import subprocess
+        # PowerShell을 이용한 Balloon/Toast 알림
+        ps_script = f"""
+        [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
+        $notification = New-Object System.Windows.Forms.NotifyIcon
+        $notification.Icon = [System.Drawing.SystemIcons]::Information
+        $notification.BalloonTipIcon = "Info"
+        $notification.BalloonTipTitle = "{title}"
+        $notification.BalloonTipText = "{message}"
+        $notification.Visible = $True
+        $notification.ShowBalloonTip(5000)
+        """
+        # PowerShell 명령어를 실행하여 풍선 도움말(알림)을 띄움
+        subprocess.run(["powershell", "-Command", ps_script], capture_output=True, text=True)
+        logger.info(f"OS Notification shown: {title} - {message}")
+    except Exception as e:
+        logger.error(f"Failed to show OS notification: {e}")
+
+
+def play_notification_sound():
+    """로그인 요구 및 중단 발생 시 알림음 재생 - rules.md 정책 반영"""
+    try:
+        import winsound
+        windir = os.environ.get('SystemRoot', 'C:\\Windows')
+        wav_path = os.path.join(windir, 'Media', 'Speech Off.wav')
+        if os.path.exists(wav_path):
+            winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            logger.info(f"Notification sound played ({wav_path})")
+        else:
+            winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
+            logger.info("Notification sound played (SystemAsterisk fallback)")
+    except Exception as e:
+        try:
+            print('\a')
+            logger.info("Notification beep played (fallback)")
+        except Exception:
+            logger.debug(f"Failed to play notification sound: {e}")
+

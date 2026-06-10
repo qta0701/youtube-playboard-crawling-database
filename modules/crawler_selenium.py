@@ -2,6 +2,7 @@ import os
 import re
 import time
 import random
+import threading
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -15,7 +16,17 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from config import Config
 from logger_config import setup_logger, log_exception
-from modules.utils import parse_korean_number_string, play_sound, clean_text
+from modules.utils import (
+    parse_korean_number_string, 
+    play_sound, 
+    clean_text, 
+    get_chrome_profile_path, 
+    show_notification, 
+    play_notification_sound
+)
+
+# selenium-stealth 임포트
+from selenium_stealth import stealth
 
 logger = setup_logger('crawler')
 
@@ -30,10 +41,23 @@ class PlayboardCrawler:
     - 향상된 데이터 추출 (Video ID, Channel ID, 순위 증감)
     - webdriver-manager로 자동 ChromeDriver 설치
     """
+    # 병렬 기동 시 ChromeDriver 다운로드 및 기동 동시성 제어를 위한 스레드 락
+    _driver_init_lock = threading.Lock()
 
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, worker_id=1):
         self.headless = headless
+        self.worker_id = worker_id
         self.driver = None
+        self.stop_requested = False
+        self.resume_requested = False
+
+    def random_delay(self, min_val=0.5, max_val=1.5):
+        """
+        사람과 유사한 동작 모사를 위해 임의의 딜레이를 클릭/입력/동작 사이에 적용합니다.
+        """
+        delay = random.uniform(min_val, max_val)
+        logger.debug(f"[Delay] Sleeping for {delay:.2f} seconds to simulate human behavior...")
+        time.sleep(delay)
 
     @staticmethod
     def parse_numeric_field(text):
@@ -97,21 +121,35 @@ class PlayboardCrawler:
             logger.error(f"Failed to save error HTML snapshot: {e}")
 
     def _init_driver(self):
-        """Chrome WebDriver 초기화 (자동 ChromeDriver 설치, 강화된 Fallback)"""
+        """Chrome WebDriver 초기화 (초기화 락, 랜덤 디버깅 포트, 백그라운드 최적화)"""
+        # [원칙] 네이버/플레이보드 보안 감지 회피 및 디버깅을 용이하게 하기 위해 GUI 모드(headless=False) 실행을 우선합니다.
+        profile_path = get_chrome_profile_path()
+        logger.info(f"Using Chrome profile path: {profile_path}")
+
         chrome_options = Options()
         if self.headless:
             chrome_options.add_argument('--headless')
+            
+        # 병렬 기동 시 포트 충돌 방지를 위해 Remote Debugging Port를 랜덤(9300~9500)하게 할당
+        debug_port = random.randint(9300, 9500)
+        chrome_options.add_argument(f"--remote-debugging-port={debug_port}")
+        logger.info(f"Allocated Chrome remote debugging port: {debug_port}")
+
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_argument(f"--user-data-dir={profile_path}")
 
-        # [PLAN.md Phase 3] Chrome 옵션 보강 (백그라운드 제약 해제)
+        # 백그라운드 구동 스로틀링 완전 비활성화 (최소화 상태에서도 속도 지연 방지)
         chrome_options.add_argument('--disable-background-timer-throttling')
         chrome_options.add_argument('--disable-backgrounding-occluded-windows')
         chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--disable-features=CalculatePageVisibility')
+        chrome_options.add_argument('--disable-features=IntensiveWakeUpThrottling')
+        chrome_options.add_argument('--disable-features=ThrottleDelayableQueueOnCpuUsage')
         chrome_options.add_argument('--disable-infobars')  # "자동화된 소프트웨어..." 바 제거
         logger.debug("Background optimization options enabled")
 
@@ -119,64 +157,72 @@ class PlayboardCrawler:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        # 다단계 Fallback 로직 (성능 최적화: 시스템 PATH 우선)
         driver_initialized = False
 
-        # 1차 시도: 시스템 PATH의 ChromeDriver 사용 (가장 안정적)
-        if not driver_initialized:
-            try:
-                logger.debug("Attempting to use ChromeDriver from system PATH...")
-                self.driver = webdriver.Chrome(options=chrome_options)
-                logger.info("✓ ChromeDriver initialized from system PATH")
-                driver_initialized = True
-            except Exception as e:
-                logger.debug(f"System PATH ChromeDriver not available: {e}")
-
-        # 2차 시도: 프로젝트 내 chromedriver.exe 확인
-        if not driver_initialized:
-            try:
-                local_driver_path = "chromedriver.exe"
-                if os.path.exists(local_driver_path):
-                    logger.debug(f"Attempting to use local ChromeDriver: {local_driver_path}")
-                    service = Service(local_driver_path)
+        # 초기화 락 (Driver Lock)을 통해 ChromeDriverManager 설치 및 기동 프로세스 동시성 보호
+        with PlayboardCrawler._driver_init_lock:
+            # 1차 시도: webdriver-manager 사용 (버전 매칭이 가장 완벽하여 최우선)
+            if not driver_initialized:
+                try:
+                    logger.info("Attempting to download and install ChromeDriver with webdriver-manager...")
+                    service = Service(ChromeDriverManager().install())
                     self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                    logger.info("✓ ChromeDriver initialized from project directory")
+                    logger.info("✓ ChromeDriver initialized with webdriver-manager")
                     driver_initialized = True
-            except Exception as e:
-                logger.debug(f"Local ChromeDriver failed: {e}")
+                except Exception as e:
+                    logger.warning(f"[Driver Init] Fallback ChromeDriver installation via webdriver-manager failed: {e}")
 
-        # 3차 시도: webdriver-manager 사용 (fallback)
-        if not driver_initialized:
+            # 2차 시도: 시스템 PATH의 ChromeDriver 사용
+            if not driver_initialized:
+                try:
+                    logger.debug("Attempting to use ChromeDriver from system PATH...")
+                    self.driver = webdriver.Chrome(options=chrome_options)
+                    logger.info("✓ ChromeDriver initialized from system PATH")
+                    driver_initialized = True
+                except Exception as e:
+                    logger.warning(f"[Driver Init] System PATH ChromeDriver not available: {e}")
+
+            # 3차 시도: 프로젝트 내 chromedriver.exe 확인
+            if not driver_initialized:
+                try:
+                    local_driver_path = "chromedriver.exe"
+                    if os.path.exists(local_driver_path):
+                        logger.debug(f"Attempting to use local ChromeDriver: {local_driver_path}")
+                        service = Service(local_driver_path)
+                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                        logger.info("✓ ChromeDriver initialized from project directory")
+                        driver_initialized = True
+                except Exception as e:
+                    logger.warning(f"[Driver Init] Local ChromeDriver in project directory failed: {e}")
+
+            # 모든 시도 실패
+            if not driver_initialized:
+                error_msg = "ChromeDriver initialization failed. Please install ChromeDriver manually."
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            # 봇 탐지 우회 설정 (selenium-stealth 적용)
             try:
-                logger.debug("Attempting to initialize ChromeDriver with webdriver-manager...")
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info("✓ ChromeDriver initialized with webdriver-manager")
-                driver_initialized = True
+                stealth(
+                    self.driver,
+                    languages=["ko-KR", "ko"],
+                    vendor="Google Inc.",
+                    platform="Win32",
+                    webgl_vendor="Intel Inc.",
+                    renderer="Intel Iris OpenGL Engine",
+                    fix_hairline=True,
+                )
+                logger.info("✓ selenium-stealth successfully applied for bot bypass")
             except Exception as e:
-                logger.warning(f"webdriver-manager failed: {e}")
+                logger.warning(f"Failed to apply selenium-stealth: {e}")
 
-        # 모든 시도 실패
-        if not driver_initialized:
-            error_msg = "ChromeDriver initialization failed. Please install ChromeDriver manually."
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-        # WebDriver 스크립트 실행
+        # 추가 WebDriver 마스킹 스크립트 실행
         try:
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-            # [PLAN.md Phase 1.1] 브라우저 최대화 (최소화 제거)
-            # 최소화 시 Chrome Throttling으로 인해 크롤링 속도 저하 및 멈춤 현상 발생
+            
+            # 창 크기 기본 최대화 (최소화 상태에서도 기본 레이아웃 안정을 위해 처리하되 강제 팝업 포커싱은 제거)
             self.driver.maximize_window()
             logger.debug("ChromeDriver configured successfully (maximized)")
-
-            # 브라우저가 맨 앞으로 오도록 강제 포커스
-            try:
-                self.driver.switch_to.window(self.driver.current_window_handle)
-                logger.debug("[System] Browser activated successfully")
-            except:
-                pass
         except Exception as e:
             logger.warning(f"Failed to configure ChromeDriver properties: {e}")
 
@@ -232,13 +278,13 @@ class PlayboardCrawler:
             self.driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
 
             # 2. 아주 짧은 대기 (시각적 인식 시간)
-            time.sleep(random.uniform(0.5, 1.2))
+            self.random_delay(0.5, 1.2)
 
             # 3. 가끔(30% 확률) 살짝 위로 올림 (읽는 척)
             if random.random() < 0.3:
                 up_scroll = random.randint(-200, -50)
                 self.driver.execute_script(f"window.scrollBy(0, {up_scroll});")
-                time.sleep(random.uniform(0.5, 0.8))
+                self.random_delay(0.5, 0.8)
                 logger.debug("Human-like behavior: scrolled up briefly")
         except Exception as e:
             logger.debug(f"Human scroll error: {e}")
@@ -263,23 +309,16 @@ class PlayboardCrawler:
         from selenium.common.exceptions import TimeoutException
 
         while attempts < max_attempts:
-            # [PLAN.md Phase 2.1] 비활성 감지 및 강제 활성화
+            # 1. 프로세스 중단 요청 확인
+            if self.stop_requested:
+                logger.warning("🛑 [System] 스크롤 루프 도중 프로세스 중단 요청이 감지되었습니다. 스크롤을 즉시 중단합니다.")
+                break
+
+            # 백그라운드 상태(최소화 등) 모니터링
             try:
                 is_hidden = self.driver.execute_script("return document.hidden;")
                 if is_hidden:
-                    logger.debug("[System] Browser is backgrounded/hidden. Attempting to wake up...")
-                    try:
-                        # 1. JS 레벨 포커스
-                        self.driver.execute_script("window.focus();")
-                        # 2. Selenium 레벨 포커스 (창 핸들 전환)
-                        self.driver.switch_to.window(self.driver.current_window_handle)
-                        logger.debug("[System] Inactivity detected. Bringing window to front.")
-                    except Exception as e:
-                        logger.debug(f"Wake up failed: {e}")
-
-                # [PLAN.md Phase 2.1] Throttling 방지용 더미 인터랙션
-                # click() 제거: 광고 클릭 방지 (2026-01-04)
-                pass
+                    logger.debug("[System] Browser is running in background (minimized/occluded)")
             except Exception as e:
                 logger.debug(f"[System] Visibility check failed: {e}")
 
@@ -312,7 +351,7 @@ class PlayboardCrawler:
                     # Fallback: 기존 방식
                     self.driver.execute_script("window.scrollBy(0, 500);")
             except Exception as e:
-                logger.debug(f"[Scroll] Element-based scroll failed: {e}, using fallback")
+                logger.warning(f"[Scroll] Element-based scroll failed (elements might not be loaded yet): {e}, using viewport fallback")
                 self.driver.execute_script("window.scrollBy(0, 500);")
 
             # [PLAN.md Phase 1.3.B] 고정 대기 제거 -> 동적 대기
@@ -368,15 +407,16 @@ class PlayboardCrawler:
                 if no_change_count >= 3:
                     logger.info(f"[Scroll] Wiggle attempt at {new_items_loaded} items (no_change: {no_change_count})...")
                     self.driver.execute_script("window.scrollBy(0, -200);")
-                    time.sleep(0.2)
+                    self.random_delay(0.1, 0.3)
                     self.driver.execute_script("window.scrollBy(0, 200);")
-                    time.sleep(0.5)
+                    self.random_delay(0.4, 0.7)
 
                 # [PLAN.md Phase 1.3.B] 10회 연속 변화 없음 시 중단
                 if no_change_count >= 10:
-                    logger.warning(f"No more items loading after 10 attempts. Stopping at {new_items_loaded} items")
+                    logger.warning(f"⚠ [Crawl Warning] No more items loading after 10 attempts. Stopping at {new_items_loaded} items")
+                    logger.warning(f"목표 수량인 {target_count}개에 미치지 못하고 스크롤이 정지되었습니다.")
                     if new_items_loaded <= 25:
-                        logger.warning("Note: Playboard may require login for more than ~20 items")
+                        logger.warning("Note: Playboard may require user login (login_mode=True) for more than ~20 items")
                     break
             else:
                 items_loaded = new_items_loaded
@@ -384,17 +424,24 @@ class PlayboardCrawler:
 
             attempts += 1
             # 최소 안정화 시간
-            time.sleep(0.5)
+            self.random_delay(0.4, 0.8)
 
         return new_items_loaded if new_items_loaded > 0 else items_loaded
 
+    def _check_login_status_quick(self):
+        """빠른 로그인 여부 체크 (수동 재개 시 사용)"""
+        try:
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            rows = soup.select('table.sheet tbody tr.chart__row')
+            if not rows:
+                rows = soup.select('tbody tr')
+            return len(rows) > 30
+        except:
+            return False
+
     def _wait_for_login(self, max_wait_time=120):
         """
-        로그인 대기 및 완료 감지
-
-        로그인 완료 감지 방식:
-        - 스크롤 테스트로 30개 이상 로드되는지 확인 (가장 정확)
-        - 비로그인 시 약 22개로 제한됨
+        로그인 대기 및 완료 감지 (수동 재개 및 프로세스 중단 연동)
 
         Args:
             max_wait_time (int): 최대 대기 시간 (초)
@@ -402,29 +449,60 @@ class PlayboardCrawler:
         logger.info("=" * 60)
         logger.info("[로그인 모드] 브라우저에서 Playboard에 로그인해주세요!")
         logger.info(f"최대 대기 시간: {max_wait_time}초")
-        logger.info("로그인 완료 후 스크롤 테스트로 자동 감지합니다.")
+        logger.info("로그인 완료 후 자동으로 감지되거나, '수동 재개' 버튼을 눌러 즉시 진행할 수 있습니다.")
         logger.info("=" * 60)
 
-        start_time = time.time()
-        check_interval = 10  # 10초마다 스크롤 테스트
+        # OS 알림음 재생 및 알림 메시지 노출
+        try:
+            play_notification_sound()
+            show_notification(
+                f"[워커 {self.worker_id}번 브라우저] 로그인 대기 요구",
+                f"Playboard 로그인 상태를 감지하지 못했습니다. 브라우저에서 로그인을 완료해주세요."
+            )
+        except Exception as alert_err:
+            logger.warning(f"Failed to trigger login notification: {alert_err}")
 
-        # 첫 번째 확인 전 5초 대기 (페이지 로드)
-        time.sleep(5)
+        start_time = time.time()
+        check_interval = 10  # 10초마다 자동 스크롤 테스트
+
+        # 첫 번째 확인 전 대기하되, 0.5초 간격으로 중단 요청 확인
+        for _ in range(10):
+            if self.stop_requested:
+                logger.warning("🛑 [System] 로그인 대기 시작 중 프로세스 중단 요청이 감지되었습니다.")
+                return False
+            time.sleep(0.5)
 
         while time.time() - start_time < max_wait_time:
+            # 1. 중단 플래그 검사
+            if self.stop_requested:
+                logger.warning("🛑 [System] 로그인 대기 중 프로세스 중단 요청이 감지되어 대기를 종료합니다.")
+                return False
+
+            # 2. 수동 재개 플래그 검사
+            if self.resume_requested:
+                logger.info("⏯️ [System] 사용자 수동 재개 요청 감지! 즉시 로그인 상태를 검증합니다.")
+                self.resume_requested = False  # 플래그 초기화
+                if self._check_login_status_quick():
+                    logger.info("✓ [System] 수동 재개 성공: 로그인이 확인되었습니다.")
+                    self.driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(1)
+                    return True
+                else:
+                    logger.warning("⚠ [System] 수동 재개 실패: 아직 로그인이 완료되지 않았거나 데이터 로드가 덜 되었습니다. 대기를 지속합니다.")
+
             elapsed = int(time.time() - start_time)
             remaining = max_wait_time - elapsed
 
-            logger.info(f"로그인 확인 중... (경과: {elapsed}초, 남은 시간: {remaining}초)")
+            logger.info(f"로그인 확인 중... (경과: {elapsed}초, 남은 시간: {remaining}초 / '수동 재개' 가능)")
 
             try:
-                # 스크롤 테스트: 비로그인 시 약 22개로 제한됨
+                # 스크롤 테스트로 로그인 유효성 체크
                 body = self.driver.find_element(By.TAG_NAME, 'body')
-
-                # 스크롤 3회 시도
                 for _ in range(3):
+                    if self.stop_requested:
+                        return False
                     body.send_keys(Keys.END)
-                    time.sleep(1.5)
+                    time.sleep(1.0)
 
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
                 rows = soup.select('table.sheet tbody tr.chart__row')
@@ -434,12 +512,8 @@ class PlayboardCrawler:
                 loaded_count = len(rows)
                 logger.info(f"현재 로드된 항목: {loaded_count}개")
 
-                # 30개 이상이면 로그인된 것으로 간주
                 if loaded_count > 30:
-                    logger.info(f"✓ 로그인 감지됨! ({loaded_count}개 로드됨)")
-                    logger.info(f"로그인 완료까지 {elapsed}초 소요")
-
-                    # 페이지 맨 위로 돌아가기
+                    logger.info(f"✓ 로그인 자동 감지됨! ({loaded_count}개 로드됨)")
                     self.driver.execute_script("window.scrollTo(0, 0);")
                     time.sleep(2)
                     return True
@@ -447,9 +521,12 @@ class PlayboardCrawler:
             except Exception as e:
                 logger.debug(f"로그인 확인 중 오류 (무시됨): {e}")
 
-            time.sleep(check_interval)
+            # check_interval 대기 시, 0.5초 간격으로 쪼개서 중단 요청을 빠르게 폴링
+            for _ in range(int(check_interval / 0.5)):
+                if self.stop_requested:
+                    return False
+                time.sleep(0.5)
 
-        # 시간 초과
         logger.warning(f"로그인 대기 시간 초과 ({max_wait_time}초)")
         logger.warning("비로그인 상태로 진행합니다. (약 20개만 수집 가능)")
         return False
@@ -504,14 +581,26 @@ class PlayboardCrawler:
                 logger.warning("100개 이상 수집을 원하시면 login_mode=True로 설정하세요.")
                 logger.warning("=" * 80)
 
+            if self.stop_requested:
+                logger.warning("🛑 [System] 크롤링 기동 직전 중단 요청이 감지되었습니다.")
+                return pd.DataFrame()
+
             self.driver.get(url)
-            time.sleep(3)
+            
+            for _ in range(6):
+                if self.stop_requested:
+                    return pd.DataFrame()
+                time.sleep(0.5)
 
             if login_mode:
                 self._wait_for_login()
+                if self.stop_requested:
+                    return pd.DataFrame()
 
             # 스크롤하여 데이터 로드
             items_loaded = self._scroll_to_load_items(target_count)
+            if self.stop_requested:
+                return pd.DataFrame()
 
             # 페이지 소스 파싱
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
@@ -520,13 +609,18 @@ class PlayboardCrawler:
             retry_attempted = False
             rows = soup.select('table.sheet tbody tr.chart__row')
             if not rows and not retry_attempted:
-                logger.warning("No elements found. Attempting page refresh...")
+                logger.warning("⚠ [Warning] No elements ('tr.chart__row') found on page. Attempting page refresh to reload...")
                 self.driver.refresh()
                 time.sleep(3)
                 items_loaded = self._scroll_to_load_items(target_count)
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                rows = soup.select('table.sheet tbody tr.chart__row')
                 retry_attempted = True
-                logger.info("Page refresh completed")
+                logger.info("Page refresh and scroll reload completed")
+                
+            if not rows:
+                logger.error("❌ [Error] Failed to find table elements ('tr.chart__row') even after page refresh!")
+                logger.error("보안 로그인 만료 또는 네트워크 접속 차단, 혹은 플레이보드 레이아웃 구조 변경 가능성이 있습니다.")
 
             # 타겟 타입에 따라 다른 파싱 메서드 호출
             if target_type == 'channel':

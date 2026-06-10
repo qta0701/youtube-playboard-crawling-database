@@ -59,9 +59,9 @@ def setup_logger(name='youtube_crawler', log_dir='logs'):
         datefmt='%H:%M:%S'
     )
 
-    # 1. 콘솔 핸들러 (INFO 레벨)
+    # 1. 콘솔 핸들러 (DEBUG 레벨로 변경하여 상세 로그가 cmd에 출력되도록 함)
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.DEBUG)
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
@@ -90,6 +90,28 @@ def setup_logger(name='youtube_crawler', log_dir='logs'):
         logger.info("=" * 80)
 
     return logger
+
+
+def cleanup_old_logs(log_dir='logs', keep_count=5):
+    """최근 n개의 로그 파일만 남기고 오래된 로그 파일 삭제"""
+    if not os.path.exists(log_dir):
+        return
+    try:
+        # log_*.log 패턴의 파일들만 수집
+        files = [os.path.join(log_dir, f) for f in os.listdir(log_dir) if f.startswith('log_') and f.endswith('.log')]
+        # 파일 수정 시간(mtime) 기준으로 내림차순 정렬 (최신 파일이 앞에 옴)
+        files.sort(key=os.path.getmtime, reverse=True)
+        
+        # keep_count를 초과하는 파일들은 삭제
+        if len(files) > keep_count:
+            files_to_delete = files[keep_count:]
+            for file_path in files_to_delete:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def log_exception(logger, exception, context=""):
