@@ -18,7 +18,7 @@
 
 - **파이썬 3.14 표준 및 동적 경로 준수**: 본 프로젝트는 파이썬 3.14 버전(`python3.14-64.exe`)을 기본 실행 환경으로 삼는다. 다양한 PC 환경에 유연하게 대응하기 위해 절대 경로를 직접 하드코딩하지 않고, 사용자 환경 변수 `PATH`에 등록된 `C:\Users\<유저명>\AppData\Local\Python\bin` 경로 또는 `%USERPROFILE%\AppData\Local\Python\bin` 아래의 `python3.14-64.exe`를 동적으로 탐색하여 실행한다. 향후 신규 프로젝트 생성, 배치 스크립트 작성, 라이브러리 추가 등 모든 작업 시 이 파이썬 3.14 버전의 호환성과 문법을 엄격히 준수한다.
 - **스트림릿(Streamlit 1.58+) 규정**: 최신 버전 스트림릿에서 지원 중단된 구버전 API(예: `st.components.v1.html`)의 사용을 엄격히 금지한다. HTML/CSS/JavaScript 코드 삽입 시에는 `st.html(..., unsafe_allow_javascript=True)`을 우선적으로 사용하며, 외부 웹페이지 임베딩 목적일 경우에만 `st.iframe`을 사용하도록 코드를 작성한다.
-- **다른 PC 환경의 절대 경로 호환성 확보**: 배치 작업 결과물 및 메타데이터(`.json`, `map_path`, `save_dir` 등)에 기록된 타 PC의 절대 경로를 읽거나 쓸 때, 현재 PC 환경의 프로젝트 루트 경로와 결합하여 정상 동작할 수 있도록 반드시 `utils.system_utils.resolve_meta_path` 유틸리티를 적용해 동적으로 경로를 치환 및 정규화하여 사용한다.
+- **다른 PC 환경의 절대 경로 호환성 확보**: 작업 결과물 및 메타데이터(`.json`, `map_path`, `save_dir` 등)에 기록된 타 PC의 절대 경로를 읽거나 쓸 때, 현재 PC 환경의 프로젝트 루트 경로와 결합하여 정상 동작할 수 있도록 반드시 `utils.system_utils.resolve_meta_path` 유틸리티를 적용해 동적으로 경로를 치환 및 정규화하여 사용한다.
 
 ---
 *이 파일의 내용은 Antigravity AI가 대화를 시작하거나 작업을 수행할 때 항상 최우선으로 고려해야 합니다.*
