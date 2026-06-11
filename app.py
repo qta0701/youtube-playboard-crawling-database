@@ -19,7 +19,7 @@ from modules.youtube_handler import YouTubeTranscriptExtractor
 from modules.database import DatabaseHandler
 from modules.youtube_manager import YouTubeManager
 from modules.quota_tracker import QuotaTracker
-from modules.utils import sanitize_filename, generate_safe_filepath, play_sound
+from modules.utils import sanitize_filename, generate_safe_filepath, play_sound, parse_count_string
 
 # 로거 및 클린업 획득
 from logger_config import setup_logger, cleanup_old_logs
@@ -326,6 +326,7 @@ def load_settings():
         "crawl_dash_type": "📱 쇼츠 (Shorts)",
         "crawl_dash_layout": "캐러셀형 (카드 그리드)",
         "dash_sort_order": "높은 순위순",
+        "dash_highlight_ratio": 10.0,
         
         "crawl_search_keyword": "",
         "crawl_search_type": "전체",
@@ -1508,7 +1509,7 @@ with tabs[1]:
                 layout_style = st.radio("레이아웃 스타일", layout_options, index=layout_idx, key="crawl_dash_layout", horizontal=True)
             with col_dash3:
                 # 정렬 순서 선택
-                sort_order_opts = ["높은 순위순", "낮은 순위순", "지표 높은순", "지표 낮은순"]
+                sort_order_opts = ["높은 순위순", "낮은 순위순", "지표 높은순", "지표 낮은순", "비율 높은순", "비율 낮은순"]
                 sort_order_val = saved_ui.get('dash_sort_order', "높은 순위순")
                 sort_order_idx = sort_order_opts.index(sort_order_val) if sort_order_val in sort_order_opts else 0
                 sort_order = st.selectbox("정렬 순서", sort_order_opts, index=sort_order_idx, key="dash_sort_order")
@@ -1538,6 +1539,8 @@ with tabs[1]:
             is_low_rank = sort_order == "낮은 순위순"
             is_high_metric = sort_order == "지표 높은순"
             is_low_metric = sort_order == "지표 낮은순"
+            is_high_ratio = sort_order == "비율 높은순"
+            is_low_ratio = sort_order == "비율 낮은순"
             
             if is_high_rank:
                 order_clause = "rank ASC"
@@ -1547,6 +1550,8 @@ with tabs[1]:
                 order_clause = f"{metric_column} DESC, rank ASC"
             elif is_low_metric:
                 order_clause = f"{metric_column} ASC, rank DESC"
+            else: # 비율 높은순, 비율 낮은순
+                order_clause = "rank ASC"
             
             try:
                 if "쇼츠" in type_tab:
@@ -1568,6 +1573,35 @@ with tabs[1]:
                 st.error(f"데이터 로드 실패: {load_err}")
             finally:
                 conn.close()
+                
+            if not df_dash.empty:
+                # 비율 계산
+                is_ch = "채널" in type_tab
+                
+                def calc_ratio(row, is_channel):
+                    sub_val = row.get('subscriber_count')
+                    if is_channel:
+                        views_val = row.get('total_views', 0)
+                    else:
+                        views_val = row.get('views', 0)
+                    
+                    sub_num = parse_count_string(sub_val) if sub_val is not None else 0
+                    try:
+                        views_num = float(views_val) if views_val is not None else 0.0
+                    except:
+                        views_num = 0.0
+                    
+                    if sub_num > 0:
+                        return round(views_num / sub_num, 1)
+                    return 0.0
+                
+                df_dash['view_sub_ratio'] = df_dash.apply(lambda r: calc_ratio(r, is_ch), axis=1)
+                
+                # 정렬이 비율 정렬인 경우 Pandas 정렬 사전 적용
+                if is_high_ratio:
+                    df_dash = df_dash.sort_values(by=['view_sub_ratio', 'rank'], ascending=[False, True])
+                elif is_low_ratio:
+                    df_dash = df_dash.sort_values(by=['view_sub_ratio', 'rank'], ascending=[True, True])
                 
             if df_dash.empty:
                 st.warning("선택한 세부 조건에 해당하는 크롤링 데이터가 없습니다.")
@@ -1601,6 +1635,19 @@ with tabs[1]:
                     st.session_state['dash_category_selected'] = 'All'
                 if st.session_state['dash_category_selected'] not in categories_list:
                     st.session_state['dash_category_selected'] = categories_list[0] if categories_list else 'All'
+                
+                # 조회수 배율 강조 기준 설정 파라미터 추가 (카테고리 선택 위쪽 배치)
+                if 'dash_highlight_ratio' not in st.session_state:
+                    st.session_state['dash_highlight_ratio'] = float(saved_ui.get('dash_highlight_ratio', 10.0))
+                
+                highlight_ratio = st.number_input(
+                    "📊 조회수 비율 강조 기준 (배 이상)",
+                    min_value=0.0,
+                    value=float(st.session_state['dash_highlight_ratio']),
+                    step=1.0,
+                    key="dash_highlight_ratio",
+                    help="구독자수 대비 조회수 배율이 설정한 배수 이상일 때 대시보드에서 강조 색상(형광색)으로 표출하고, 미만일 경우 일반 조회수 폰트 스타일로 보여줍니다."
+                )
                     
                 selected_cat = st.pills(
                     "카테고리 선택", 
@@ -1643,20 +1690,64 @@ with tabs[1]:
                 except Exception as tbl_err:
                     logger.warning(f"카테고리별 데이터 개수 테이블 생성 실패: {tbl_err}")
                 
-                # 선택한 카테고리로 필터링
+                # 선택한 카테고리로 필터링 (SettingWithCopy 방지를 위해 명시적 .copy() 수행)
                 if selected_cat != "All":
-                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") == selected_cat]
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") == selected_cat].copy()
                 else:
-                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"]
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"].copy()
                 
                 # 모든 카테고리 필터 결과에서 중복 영상 제거 (동적 해시 방지 위해 타이틀/채널명 조합 활용)
+                # 정렬 옵션에 관계없이 항상 가장 최근 수집된(crawled_at이 최신인) 고유 단 건만 보존하여 정합성을 보장하기 위해,
+                # 중복 제거 직전에 'crawled_at' 및 'id' 기준 역순 정렬을 선 수행한 뒤 keep='first'를 적용합니다.
                 if not df_filtered.empty:
+                    # 컬럼명 대소문자 불일치 방지를 위해 소문자화
+                    df_filtered.columns = [c.lower() for c in df_filtered.columns]
+                    
+                    # crawled_at 정렬 정밀도 확보를 위해 datetime 형식 변환 시도
+                    if 'crawled_at' in df_filtered.columns:
+                        df_filtered['crawled_at_parsed'] = pd.to_datetime(df_filtered['crawled_at'], errors='coerce')
+                    else:
+                        df_filtered['crawled_at_parsed'] = pd.NaT
+
+                    sort_cols = []
+                    sort_asc = []
+                    
+                    # crawled_at_parsed가 있으면 우선 정렬 기준으로 사용
+                    if 'crawled_at_parsed' in df_filtered.columns and not df_filtered['crawled_at_parsed'].isna().all():
+                        sort_cols.append('crawled_at_parsed')
+                        sort_asc.append(False)
+                    elif 'crawled_at' in df_filtered.columns:
+                        sort_cols.append('crawled_at')
+                        sort_asc.append(False)
+                        
+                    if 'id' in df_filtered.columns:
+                        sort_cols.append('id')
+                        sort_asc.append(False)
+                    
+                    if sort_cols:
+                        df_filtered = df_filtered.sort_values(by=sort_cols, ascending=sort_asc).reset_index(drop=True)
+
                     if "채널" in type_tab:
                         if "channel_name" in df_filtered.columns:
-                            df_filtered = df_filtered.drop_duplicates(subset=["channel_name"], keep="last")
+                            df_filtered = df_filtered.drop_duplicates(subset=["channel_name"], keep="first")
                     else:
                         if "title" in df_filtered.columns and "channel_name" in df_filtered.columns:
-                            df_filtered = df_filtered.drop_duplicates(subset=["title", "channel_name"], keep="last")
+                            df_filtered = df_filtered.drop_duplicates(subset=["title", "channel_name"], keep="first")
+                
+                # 모든 필터링 및 중복 제거 완료 후, 최종적으로 사용자가 선택한 기준으로 재정렬을 수행
+                if not df_filtered.empty:
+                    if is_high_rank:
+                        df_filtered = df_filtered.sort_values(by='rank', ascending=True)
+                    elif is_low_rank:
+                        df_filtered = df_filtered.sort_values(by='rank', ascending=False)
+                    elif is_high_metric:
+                        df_filtered = df_filtered.sort_values(by=[metric_column, 'rank'], ascending=[False, True])
+                    elif is_low_metric:
+                        df_filtered = df_filtered.sort_values(by=[metric_column, 'rank'], ascending=[True, True])
+                    elif is_high_ratio:
+                        df_filtered = df_filtered.sort_values(by=['view_sub_ratio', 'rank'], ascending=[False, True])
+                    elif is_low_ratio:
+                        df_filtered = df_filtered.sort_values(by=['view_sub_ratio', 'rank'], ascending=[True, True])
                 
                 # ⚙️ 디버그 정보 복사 기능 제공 (상단)
                 with st.expander("⚙️ 디버그 정보 복사 (JSON)", expanded=False):
@@ -1743,7 +1834,7 @@ with tabs[1]:
                         background-color: #1e1e24;
                         border: 1px solid #2d2d34;
                         border-radius: 12px;
-                        padding: 12px;
+                        padding: 16px; /* 패딩을 키워 전체적인 세로 영역 크기를 확대 */
                         margin-bottom: 15px;
                         transition: all 0.3s ease-in-out;
                         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
@@ -1782,8 +1873,8 @@ with tabs[1]:
                         opacity: 0.9;
                     }
                     .card-info {
-                        font-size: 0.95em; /* 기존 0.8em에서 키움 */
-                        color: #ffffff; /* 리스트형과 일치시키기 위해 어두운 회색에서 흰색으로 변경 */
+                        font-size: 1.1em; /* 리스트형과 일치 */
+                        color: #ffffff !important;
                     }
                     .card-channel-name {
                         font-weight: bold;
@@ -1879,11 +1970,7 @@ with tabs[1]:
                         color: #ffffff; /* 조회수 폰트 흰색 */
                     }
                     
-                    /* 공통 스타일 */
-                    .card-info {
-                        font-size: 0.8em;
-                        color: #a0a0a5;
-                    }
+
 
                     /* st.pills 및 st.radio 스타일 커스터마이즈 */
                     div[data-baseweb="pill"], button[kind="pills"], button[kind="pillsActive"] {
@@ -2036,6 +2123,8 @@ with tabs[1]:
                         st.info("해당 데이터가 존재하지 않습니다.")
                         return
                     
+                    show_sort_rank = sort_order != "높은 순위순"
+                    
                     if is_list_mode:
                         # 리스트형 레이아웃 렌더링
                         for idx, (_, row) in enumerate(df_data.iterrows()):
@@ -2079,14 +2168,24 @@ with tabs[1]:
                                 if isinstance(row.get('total_views'), int):
                                     views_display = f"누적 조회수: {row.get('total_views', 0):,}"
                                 
-                                meta_info = f"<span class='list-metric'>👥 {sub_display}</span><span class='list-metric'>📈 {views_display}</span>"
+                                ratio_val = row.get('view_sub_ratio', 0.0)
+                                if ratio_val >= highlight_ratio:
+                                    ratio_html = f"<span class='list-metric' style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                else:
+                                    ratio_html = f"<span class='list-metric'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                meta_info = f"<span class='list-metric'>👥 {sub_display}</span><span class='list-metric'>📈 {views_display}</span>{ratio_html}"
                             else:
                                 # 수집 기준(조회수, 좋아요, 댓글)에 맞춰 렌더링 우선순위 표시
                                 views_formatted = f"{views_val:,}" if isinstance(views_val, int) else views_val
                                 likes_formatted = f"{likes_val:,}" if isinstance(likes_val, int) else likes_val
                                 comments_formatted = f"{comments_val:,}" if isinstance(comments_val, int) else comments_val
                                 
-                                meta_info = f"<span class='list-metric'>👁️ 조회수: {views_formatted}</span><span class='list-metric'>❤️ 좋아요: {likes_formatted}</span><span class='list-metric'>💬 댓글: {comments_formatted}</span>"
+                                ratio_val = row.get('view_sub_ratio', 0.0)
+                                if ratio_val >= highlight_ratio:
+                                    ratio_html = f"<span class='list-metric' style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                else:
+                                    ratio_html = f"<span class='list-metric'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                meta_info = f"<span class='list-metric'>👁️ 조회수: {views_formatted}</span><span class='list-metric'>❤️ 좋아요: {likes_formatted}</span><span class='list-metric'>💬 댓글: {comments_formatted}</span>{ratio_html}"
                                 
                             raw_cat = row.get("category", "")
                             clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
@@ -2094,6 +2193,30 @@ with tabs[1]:
                             safe_title = clean_js_text(title)
                             safe_channel = clean_js_text(channel_name)
                             
+                            # 채널명 아래 구독자 수 정보 분리 추가
+                            sub_html = ""
+                            if "채널" not in type_tab:
+                                sub_val = row.get('subscriber_count', '')
+                                if sub_val and sub_val != "N/A" and sub_val != 0 and sub_val != "0":
+                                    if isinstance(sub_val, int):
+                                        sub_text = f"{sub_val:,}"
+                                    elif isinstance(sub_val, float):
+                                        sub_text = f"{int(sub_val):,}"
+                                    elif isinstance(sub_val, str):
+                                        if sub_val.isdigit():
+                                            sub_text = f"{int(sub_val):,}"
+                                        else:
+                                            sub_text = sub_val
+                                    else:
+                                        sub_text = str(sub_val)
+                                    
+                                    safe_sub = clean_js_text(sub_text)
+                                    sub_html = f'<div style="margin-top: 4px;"><span class="list-subscribers" style="color: #ffffff; font-size: 1.1em; cursor: pointer;" title="클릭 시 복사" data-copy-text="{safe_sub}" onclick="window.copyToClipboard(\'{safe_sub}\')">👥 구독자수: {sub_text}</span></div>'
+                            
+                            sort_rank_html = ""
+                            if show_sort_rank:
+                                sort_rank_html = f"<span style='background-color: #007bff; color: white; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🔄 정렬순위: {idx + 1}위</span>"
+
                             list_content = f"""
                             <div class="list-card">
                                 <span class="list-badge">{rank}위 ({rc_display})</span>
@@ -2103,9 +2226,15 @@ with tabs[1]:
                                 <div class="list-content">
                                     <div class="list-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
                                     <div class="list-info">
-                                        <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🏷️ {clean_cat}</span>
-                                        <span class="list-channel-name" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
-                                        {meta_info}
+                                        <div style="margin-bottom: 4px;">
+                                            <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🏷️ {clean_cat}</span>
+                                            {sort_rank_html}
+                                            <span class="list-channel-name" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
+                                        </div>
+                                        {sub_html}
+                                        <div style="margin-top: 4px;">
+                                            {meta_info}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2155,12 +2284,22 @@ with tabs[1]:
                                     views_display = f"누적 조회수: {row.get('total_views', 'N/A')}"
                                     if isinstance(row.get('total_views'), int):
                                         views_display = f"누적 조회수: {row.get('total_views', 0):,}"
-                                    metric_html = f"<div class='card-info'>👥 {sub_display}<br>📈 {views_display}</div>"
+                                    ratio_val = row.get('view_sub_ratio', 0.0)
+                                    if ratio_val >= highlight_ratio:
+                                        ratio_html = f"<span style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                    else:
+                                        ratio_html = f"📊 조회수 비율: {ratio_val:.1f}배"
+                                    metric_html = f"<div class='card-info'>👥 {sub_display}<br>📈 {views_display}<br>{ratio_html}</div>"
                                 else:
                                     views_formatted = f"{views_val:,}" if isinstance(views_val, int) else views_val
                                     likes_formatted = f"{likes_val:,}" if isinstance(likes_val, int) else likes_val
                                     comments_formatted = f"{comments_val:,}" if isinstance(comments_val, int) else comments_val
-                                    metric_html = f"<div class='card-info'>👁️ 조회수: {views_formatted}<br>❤️ 좋아요: {likes_formatted}<br>💬 댓글: {comments_formatted}</div>"
+                                    ratio_val = row.get('view_sub_ratio', 0.0)
+                                    if ratio_val >= highlight_ratio:
+                                        ratio_html = f"<span style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio_val:.1f}배</span>"
+                                    else:
+                                        ratio_html = f"📊 조회수 비율: {ratio_val:.1f}배"
+                                    metric_html = f"<div class='card-info'>👁️ 조회수: {views_formatted}<br>❤️ 좋아요: {likes_formatted}<br>💬 댓글: {comments_formatted}<br>{ratio_html}</div>"
                                 
                                 raw_cat = row.get("category", "")
                                 clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
@@ -2168,13 +2307,48 @@ with tabs[1]:
                                 safe_title = clean_js_text(title)
                                 safe_channel = clean_js_text(channel_name)
                                 
+                                # 채널명 아래 구독자 수 정보 분리 추가
+                                sub_html = ""
+                                if "채널" not in type_tab:
+                                    sub_val = row.get('subscriber_count', '')
+                                    if sub_val and sub_val != "N/A" and sub_val != 0 and sub_val != "0":
+                                        if isinstance(sub_val, int):
+                                            sub_text = f"{sub_val:,}"
+                                        elif isinstance(sub_val, float):
+                                            sub_text = f"{int(sub_val):,}"
+                                        elif isinstance(sub_val, str):
+                                            if sub_val.isdigit():
+                                                sub_text = f"{int(sub_val):,}"
+                                            else:
+                                                sub_text = sub_val
+                                        else:
+                                            sub_text = str(sub_val)
+                                        
+                                        safe_sub = clean_js_text(sub_text)
+                                        sub_html = f'<div class="card-info card-subscribers" style="color: #ffffff; font-size: 1.1em; margin-bottom: 5px; cursor: pointer;" title="클릭 시 복사" data-copy-text="{safe_sub}" onclick="window.copyToClipboard(\'{safe_sub}\')">👥 구독자수: {sub_text}</div>'
+                                
+                                # 콘텐츠 구분(type_tab)에 따라 최적의 썸네일 이미지 스타일 결정
+                                img_style = "width:100%; border-radius:8px; object-fit:cover; margin-bottom:8px;"
+                                if "쇼츠" in type_tab:
+                                    img_style += " aspect-ratio: 2/3;" # 쇼츠 세로 크기 확대 최적화 (4/5 -> 2/3)
+                                elif "일반 영상" in type_tab:
+                                    img_style += " aspect-ratio: 1.1/1;" # 일반 영상 세로 크기 확대 최적화 (4/3 -> 1.1/1)
+                                else: # 채널
+                                    img_style = "width:150px; height:150px; border-radius:50%; object-fit:cover; margin: 0 auto 12px auto; display:block; box-shadow: 0 4px 8px rgba(0,0,0,0.2);" # 채널 프로필 크기 확대 (120px -> 150px)
+                                
+                                sort_rank_html = ""
+                                if show_sort_rank:
+                                    sort_rank_html = f"<span style='background-color: #007bff; color: white; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🔄 정렬순위: {idx + 1}위</span>"
+
                                 card_content = f"""
                                 <div class="dashboard-card">
                                     <span class="rank-badge">{rank}위 ({rc_display})</span>
                                     <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🏷️ {clean_cat}</span>
-                                    <img src="{img_url}" style="width:100%; border-radius:8px; aspect-ratio:16/9; object-fit:cover; margin-bottom:8px;" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
+                                    {sort_rank_html}
+                                    <img src="{img_url}" style="{img_style}" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
                                     <div class="card-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
-                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:5px;" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
+                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:2px;" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
+                                    {sub_html}
                                     {metric_html}
                                 </div>
                                 """
