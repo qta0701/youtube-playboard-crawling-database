@@ -90,6 +90,16 @@ def get_db_connection():
     return conn
 
 
+def get_actual_ranking_date_str(specific_date_str):
+    """선택한 수집 날짜 기준 1일 전 날짜를 계산해 실제 플레이보드 랭킹 날짜로 매칭시킵니다."""
+    try:
+        from datetime import datetime, timedelta
+        dt = datetime.strptime(specific_date_str, "%Y-%m-%d") - timedelta(days=1)
+        return dt.strftime("%Y-%m-%d")
+    except:
+        return specific_date_str
+
+
 # ==============================================================================
 # Helper: 기존 오늘 날짜의 중간 수집 파일 검색
 # ==============================================================================
@@ -307,7 +317,32 @@ def load_settings():
         "crawl_limit": 100,
         "crawl_criteria": "조회수 순위",
         
-        # 탭 2 (DB 검색)
+        # 탭 2 (플레이보드 크롤링 데이터 대시보드 & 검색)
+        "dash_criteria": "조회수 순위",
+        "dash_country": "한국",
+        "dash_period": "일간",
+        "dash_category_selected": "All",
+        "crawl_dash_date": "",
+        "crawl_dash_type": "📱 쇼츠 (Shorts)",
+        "crawl_dash_layout": "캐러셀형 (카드 그리드)",
+        "dash_sort_order": "높은 순위순",
+        
+        "crawl_search_keyword": "",
+        "crawl_search_type": "전체",
+        "crawl_search_sort": "최근 등록일순",
+        "crawl_search_view_min": 0,
+        "crawl_search_view_max": 1000000000,
+        
+        # 탭 3 (API 연동데이터 검색)
+        "api_search_keyword": "",
+        "api_search_type": "전체",
+        "api_search_sort": "최근 등록일순",
+        "api_search_view_min": 0,
+        "api_search_view_max": 1000000000,
+        "api_search_date_from": datetime(2020, 1, 1).date(),
+        "api_search_date_to": datetime.today().date(),
+        
+        # 레거시 탭 2 (하위 호환성 유지)
         "search_keyword_val": "",
         "search_source_val": "전체",
         "search_type_val": "전체",
@@ -317,7 +352,7 @@ def load_settings():
         "search_date_to": datetime.today().date(),
         "search_sort_by": "최근 등록일순",
         
-        # 탭 3 (API 동기화)
+        # 탭 4 (API 동기화)
         "sync_channel_url": "https://www.youtube.com/@ebsdocumentary",
         "sync_limit_video": 50
     }
@@ -326,7 +361,7 @@ def load_settings():
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
                 for k, v in saved.items():
-                    if k in ["crawl_date_val", "search_date_from", "search_date_to"] and isinstance(v, str):
+                    if k in ["crawl_date_val", "search_date_from", "search_date_to", "api_search_date_from", "api_search_date_to"] and isinstance(v, str):
                         try:
                             default_settings[k] = datetime.strptime(v, '%Y-%m-%d').date()
                         except ValueError:
@@ -424,7 +459,7 @@ st.sidebar.info("개발자: YouTube Crawler Pro Team\n버전: v3.0 (Streamlit)")
 st.title("🎵 유튜브 대시보드 크롤러")
 st.markdown("유튜브 크롤링, 데이터 분석 및 API 동기화를 원스톱으로 관리합니다.")
 
-tabs = st.tabs(["🎯 플레이보드 크롤러", "📊 DB 통계 및 검색", "🔌 API 동기화"])
+tabs = st.tabs(["🎯 플레이보드 크롤러", "📊 크롤링 데이터", "🔍 API 연동데이터", "🔌 API 동기화"])
 
 
 # ==============================================================================
@@ -532,6 +567,7 @@ with tabs[0]:
         
         if not batch_mode:
             # 단일 카테고리 예측
+            calc_ranking_date = specific_date if use_specific_date else get_actual_ranking_date_str(specific_date)
             existing_filepath = find_existing_batch_file(
                 base_dir=Config.OUTPUT_DIR,
                 target_type=target_type,
@@ -539,7 +575,7 @@ with tabs[0]:
                 country=country,
                 period=period,
                 criteria=crawl_criteria,
-                ranking_date=specific_date
+                ranking_date=calc_ranking_date
             )
             
             already_collected = 0
@@ -551,7 +587,7 @@ with tabs[0]:
                     pass
             
             if already_collected == 0:
-                date_label = f"'{specific_date}' 기준" if use_specific_date else "오늘 자"
+                date_label = f"'{calc_ranking_date}' 기준"
                 st.info(f"📂 **[신규 파일 생성]** {date_label} 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
             elif already_collected >= crawl_limit:
                 st.success(f"✓ **[수집 완료 건너뜀]** 이미 **{already_collected}**개가 수집되어 목표치({crawl_limit}개)를 충족했습니다. 크롤링을 건너뜁니다.")
@@ -559,7 +595,8 @@ with tabs[0]:
                 st.warning(f"🔄 **[기존 파일 채우기]** 이미 **{already_collected}**개가 수집되어 있습니다. 부족한 **{crawl_limit - already_collected}**개를 추가 수집합니다.")
         else:
             # 일괄 카테고리 예측
-            all_categories = [cat for cat in CATEGORIES if cat != '전체']
+            calc_ranking_date = specific_date if use_specific_date else get_actual_ranking_date_str(specific_date)
+            all_categories = get_category_list()
             batch_records = []
             new_cats = 0
             update_cats = 0
@@ -574,7 +611,7 @@ with tabs[0]:
                     country=country,
                     period=period,
                     criteria=crawl_criteria,
-                    ranking_date=specific_date
+                    ranking_date=calc_ranking_date
                 )
                 
                 already_collected = 0
@@ -626,19 +663,29 @@ with tabs[0]:
                 st.code(tsv_data, language="text", wrap_lines=False)
 
         st.markdown("---")
-        btn_col1, btn_col2, btn_col3 = st.columns(3)
+        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
         with btn_col1:
             start_btn = st.button("🚀 크롤링 시작", use_container_width=True, key="crawl_start_btn")
         with btn_col2:
             resume_btn = st.button("⏯️ 수동 재개", use_container_width=True, key="crawl_resume_btn")
         with btn_col3:
+            skip_btn = st.button("⏭️ 다음 카테고리", use_container_width=True, key="crawl_skip_btn")
+        with btn_col4:
             stop_btn = st.button("🛑 프로세스 중단", use_container_width=True, key="crawl_stop_btn")
             
         # 수동 재개 처리
         if resume_btn:
             if st.session_state['crawler_instance'] is not None:
                 st.session_state['crawler_instance'].resume_requested = True
-                st.info("⏯️ 로그인 대기를 중단하고 즉시 크롤링을 재개하도록 수동 재개 신호를 전송했습니다.")
+                st.info("⏯️ 즉시 크롤링을 재개하도록 수동 재개 신호를 전송했습니다.")
+            else:
+                st.warning("동작 중인 크롤러 프로세스가 없습니다.")
+                
+        # 다음 카테고리 스킵 처리
+        if skip_btn:
+            if st.session_state['crawler_instance'] is not None:
+                st.session_state['crawler_instance'].skip_requested = True
+                st.info("⏭️ 현재 카테고리 수집을 건너뛰고 다음 카테고리로 넘어가도록 스킵 신호를 전송했습니다.")
             else:
                 st.warning("동작 중인 크롤러 프로세스가 없습니다.")
                 
@@ -738,6 +785,7 @@ with tabs[0]:
             st.session_state['log_history'] = []  # 새로 크롤링 시작 시 로그 초기화
             st.session_state['stop_requested'] = False
             st.session_state['resume_requested'] = False
+            st.session_state['skip_requested'] = False
             
             streamlit_handler = StreamlitLogHandler(log_shell)
             streamlit_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)-8s - %(message)s', '%H:%M:%S'))
@@ -745,6 +793,7 @@ with tabs[0]:
             
             try:
                 ranking_date = specific_date if specific_date else datetime.now().strftime('%Y-%m-%d')
+                calc_ranking_date = ranking_date if use_specific_date else get_actual_ranking_date_str(ranking_date)
                 target_count = crawl_limit
                 
                 logger.info("=" * 60)
@@ -766,6 +815,7 @@ with tabs[0]:
                     timestamp = int(dt.timestamp())
                 
                 crawler = PlayboardCrawler(headless=Config.CHROME_HEADLESS)
+                crawler.skip_requested = False
                 st.session_state['crawler_instance'] = crawler
                 
                 if not batch_mode:
@@ -782,7 +832,7 @@ with tabs[0]:
                         country=country,
                         period=period,
                         criteria=crawl_criteria,
-                        ranking_date=ranking_date
+                        ranking_date=calc_ranking_date
                     )
                     
                     already_collected = 0
@@ -812,7 +862,8 @@ with tabs[0]:
                             ranking_criteria=crawl_criteria,
                             start_rank=already_collected,
                             keep_open=True,
-                            category=category
+                            category=category,
+                            use_specific_date=use_specific_date
                         )
                         
                         progress_bar.progress(0.8)
@@ -833,20 +884,24 @@ with tabs[0]:
                             df = df.sort_values(by='Rank').reset_index(drop=True)
                             df['Rank'] = range(1, len(df) + 1)
                             
-                        if existing_filepath:
-                            filepath = existing_filepath
-                            filename = os.path.basename(existing_filepath)
-                        else:
-                            filepath, filename = generate_safe_filepath(
-                                base_dir=Config.OUTPUT_DIR,
-                                target_type=target_type,
-                                category=category,
-                                country=country,
-                                period=period,
-                                criteria=crawl_criteria,
-                                ranking_date=ranking_date,
-                                extension='csv'
-                            )
+                        # 실제 수집 데이터의 랭킹 날짜로 최종 네이밍 확정 (수집일이 아닌 랭킹 날짜 기준)
+                        final_ranking_date = calc_ranking_date
+                        if len(df) > 0 and 'Ranking Date' in df.columns:
+                            first_val = df['Ranking Date'].iloc[0]
+                            if pd.notna(first_val) and str(first_val) != 'N/A':
+                                final_ranking_date = str(first_val).strip()
+                                logger.info(f"[Save Path] 실제 감지된 날짜 기준으로 경로를 확정합니다: {final_ranking_date}")
+
+                        filepath, filename = generate_safe_filepath(
+                            base_dir=Config.OUTPUT_DIR,
+                            target_type=target_type,
+                            category=category,
+                            country=country,
+                            period=period,
+                            criteria=crawl_criteria,
+                            ranking_date=final_ranking_date,
+                            extension='csv'
+                        )
                         
                         if len(df) > 0:
                             metric_col = 'Views'
@@ -903,7 +958,7 @@ with tabs[0]:
                         }
                         
                 else:
-                    all_categories = [cat for cat in CATEGORIES if cat != '전체']
+                    all_categories = get_category_list()
                     
                     # 통계 트래킹용 변수
                     target_cats_count = len(all_categories)
@@ -929,7 +984,7 @@ with tabs[0]:
                             country=country,
                             period=period,
                             criteria=crawl_criteria,
-                            ranking_date=ranking_date
+                            ranking_date=calc_ranking_date
                         )
                         
                         already_collected = 0
@@ -978,8 +1033,15 @@ with tabs[0]:
                                     ranking_criteria=crawl_criteria,
                                     start_rank=already_collected,
                                     keep_open=True,
-                                    category=cat
+                                    category=cat,
+                                    use_specific_date=use_specific_date
                                 )
+                                # 사용자의 다음 카테고리 스킵 감지
+                                if getattr(crawler, 'skip_requested', False):
+                                    crawler.skip_requested = False  # 플래그 초기화
+                                    logger.warning(f"⏯️ 사용자 요청에 의해 카테고리 '{cat}' 수집이 스킵되었습니다. 다음 카테고리로 넘어갑니다.")
+                                    continue
+                                    
                                 if len(existing_df) > 0 and len(df_cat_new) > 0:
                                     existing_df = standardize_dataframe_types(existing_df, crawl_criteria)
                                     df_cat_new = standardize_dataframe_types(df_cat_new, crawl_criteria)
@@ -997,20 +1059,24 @@ with tabs[0]:
                                     df_cat = df_cat.sort_values(by='Rank').reset_index(drop=True)
                                     df_cat['Rank'] = range(1, len(df_cat) + 1)
                                     
-                                if existing_filepath:
-                                    filepath = existing_filepath
-                                else:
-                                    batch_cat_name = f"batch_{cat}"
-                                    filepath, filename = generate_safe_filepath(
-                                        base_dir=Config.OUTPUT_DIR,
-                                        target_type=target_type,
-                                        category=batch_cat_name,
-                                        country=country,
-                                        period=period,
-                                        criteria=crawl_criteria,
-                                        ranking_date=ranking_date,
-                                        extension='csv'
-                                    )
+                                # 실제 수집 데이터의 랭킹 날짜로 최종 네이밍 확정 (수집일이 아닌 랭킹 날짜 기준)
+                                final_ranking_date = calc_ranking_date
+                                if len(df_cat) > 0 and 'Ranking Date' in df_cat.columns:
+                                    first_val = df_cat['Ranking Date'].iloc[0]
+                                    if pd.notna(first_val) and str(first_val) != 'N/A':
+                                        final_ranking_date = str(first_val).strip()
+
+                                batch_cat_name = f"batch_{cat}"
+                                filepath, filename = generate_safe_filepath(
+                                    base_dir=Config.OUTPUT_DIR,
+                                    target_type=target_type,
+                                    category=batch_cat_name,
+                                    country=country,
+                                    period=period,
+                                    criteria=crawl_criteria,
+                                    ranking_date=final_ranking_date,
+                                    extension='csv'
+                                )
                                     
                                 if len(df_cat) > 0:
                                     metric_col = 'Views'
@@ -1123,6 +1189,12 @@ with tabs[0]:
                         summary_df = pd.DataFrame(summary_records)
                         under_target_df = pd.DataFrame(under_target_records)
                         
+                        final_comb_date = calc_ranking_date
+                        if len(combined_df) > 0 and 'Ranking Date' in combined_df.columns:
+                            first_val = combined_df['Ranking Date'].iloc[0]
+                            if pd.notna(first_val) and str(first_val) != 'N/A':
+                                final_comb_date = str(first_val).strip()
+
                         filepath_comb, filename_comb = generate_safe_filepath(
                             base_dir=Config.OUTPUT_DIR,
                             target_type=target_type,
@@ -1130,7 +1202,7 @@ with tabs[0]:
                             country=country,
                             period=period,
                             criteria=crawl_criteria,
-                            ranking_date=ranking_date,
+                            ranking_date=final_comb_date,
                             extension='csv'
                         )
                         
@@ -1301,12 +1373,13 @@ with tabs[0]:
 
 
 # ==============================================================================
-# 탭 2: 📊 DB 통계 및 검색
+# 탭 2: 📊 크롤링 데이터
 # ==============================================================================
 with tabs[1]:
-    st.header("📊 YouTube 통합 데이터 통계 및 검색")
+    st.header("📊 크롤링 데이터 대시보드")
     
-    st.subheader("🗂️ 수집 DB 현황")
+    # 🗂️ 크롤링 DB 현황
+    st.subheader("🗂️ 크롤링 데이터 현황")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -1317,8 +1390,6 @@ with tabs[1]:
         shorts_count = 0
         videos_count = 0
         channels_count = 0
-        api_channels_count = 0
-        api_videos_count = 0
         
         if 'shorts_rank' in tables:
             cursor.execute("SELECT COUNT(*) FROM shorts_rank")
@@ -1329,6 +1400,1011 @@ with tabs[1]:
         if 'channels_rank' in tables:
             cursor.execute("SELECT COUNT(*) FROM channels_rank")
             channels_count = cursor.fetchone()[0]
+            
+        conn.close()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Shorts 크롤링 건수", f"{shorts_count:,}건")
+        c2.metric("일반 영상 크롤링 건수", f"{videos_count:,}건")
+        c3.metric("채널 크롤링 건수", f"{channels_count:,}건")
+    except Exception as db_err:
+        st.error(f"DB 현황 조회 에러: {db_err}")
+        
+    st.markdown("---")
+    
+    # 대시보드 및 상세 검색/시각화 서브 탭 분리
+    crawl_sub_tabs = st.tabs(["📅 날짜별 대시보드", "🔍 크롤링 상세 검색", "📊 트렌드 시각화"])
+    
+    with crawl_sub_tabs[0]:
+        st.subheader("📅 수집 날짜별 대시보드 뷰")
+        
+        # 1. 탭 1 세션에서 복원하거나 load_settings에서 가져온 디폴트 값을 기반으로 st.pills 연동
+        saved_ui = st.session_state.get('ui_settings', load_settings())
+        
+        # 세션 상태 변수 초기화 (st.pills의 양방향 바인딩 및 중복 오류 방지)
+        if 'dash_criteria' not in st.session_state:
+            st.session_state['dash_criteria'] = st.session_state.get('crawl_criteria', saved_ui.get('crawl_criteria', '조회수 순위'))
+        if 'dash_country' not in st.session_state:
+            st.session_state['dash_country'] = st.session_state.get('crawl_country', saved_ui.get('crawl_country', '한국'))
+        if 'dash_period' not in st.session_state:
+            st.session_state['dash_period'] = st.session_state.get('crawl_period', saved_ui.get('crawl_period', '일간'))
+        if 'crawl_dash_type' not in st.session_state:
+            st.session_state['crawl_dash_type'] = saved_ui.get('crawl_dash_type', "📱 쇼츠 (Shorts)")
+        if 'crawl_dash_layout' not in st.session_state:
+            st.session_state['crawl_dash_layout'] = saved_ui.get('crawl_dash_layout', "캐러셀형 (카드 그리드)")
+        if 'dash_sort_order' not in st.session_state:
+            st.session_state['dash_sort_order'] = saved_ui.get('dash_sort_order', "높은 순위순")
+        if 'dash_category_selected' not in st.session_state:
+            st.session_state['dash_category_selected'] = saved_ui.get('dash_category_selected', "All")
+            
+        # 가로 버튼 나열형 필터 컴포넌트 렌더링
+        criteria_opts = ["조회수 순위", "좋아요 순위", "댓글 순위"]
+        selected_criteria = st.pills(
+            "수집 기준 (Criteria)", 
+            criteria_opts, 
+            key="dash_criteria"
+        )
+        if not selected_criteria:
+            selected_criteria = st.session_state['dash_criteria'] = '조회수 순위'
+            
+        country_opts = ["한국", "미국", "일본", "영국", "독일", "프랑스", "캐나다", "호주"]
+        selected_country = st.pills(
+            "국가 (Country)", 
+            country_opts, 
+            key="dash_country"
+        )
+        if not selected_country:
+            selected_country = st.session_state['dash_country'] = '한국'
+            
+        period_opts = ["일간", "주간", "월간"]
+        selected_period = st.pills(
+            "기간 (Period)", 
+            period_opts, 
+            key="dash_period"
+        )
+        if not selected_period:
+            selected_period = st.session_state['dash_period'] = '일간'
+            
+        # 데이터가 있는 날짜 목록 가져오기 (필터 조건 반영)
+        active_dates = []
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM shorts_rank WHERE country = ? AND period = ?
+                UNION
+                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM videos_rank WHERE country = ? AND period = ?
+                UNION
+                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM channels_rank WHERE country = ? AND period = ?
+                ORDER BY date_val DESC
+            """
+            cursor.execute(query, (selected_country, selected_period, selected_country, selected_period, selected_country, selected_period))
+            active_dates = [r[0] for r in cursor.fetchall() if r[0]]
+            conn.close()
+        except Exception as date_err:
+            st.error(f"수집 날짜 조회 오류: {date_err}")
+            
+        if not active_dates:
+            st.info(f"💡 선택된 조건(국가: '{selected_country}', 기간: '{selected_period}')으로 수집된 크롤링 데이터가 존재하지 않습니다. 유튜브 크롤러 탭에서 먼저 수집을 진행해 주세요.")
+        else:
+            # 날짜 선택 복원
+            default_dash_date = saved_ui.get("crawl_dash_date", "")
+            date_idx = active_dates.index(default_dash_date) if default_dash_date in active_dates else 0
+            selected_date = st.selectbox("수집 날짜 선택", active_dates, index=date_idx, key="crawl_dash_date")
+            
+            col_dash1, col_dash2, col_dash3 = st.columns([1, 1, 1])
+            with col_dash1:
+                # 구분 선택
+                type_options = ["📱 쇼츠 (Shorts)", "📺 일반 영상 (Video)", "🏢 채널 (Channel)"]
+                type_val = saved_ui.get('crawl_dash_type', "📱 쇼츠 (Shorts)")
+                type_idx = type_options.index(type_val) if type_val in type_options else 0
+                type_tab = st.radio("데이터 구분", type_options, index=type_idx, key="crawl_dash_type", horizontal=True)
+            with col_dash2:
+                # 레이아웃 선택
+                layout_options = ["캐러셀형 (카드 그리드)", "리스트형 (썸네일 포함)"]
+                layout_val = saved_ui.get('crawl_dash_layout', "캐러셀형 (카드 그리드)")
+                layout_idx = layout_options.index(layout_val) if layout_val in layout_options else 0
+                layout_style = st.radio("레이아웃 스타일", layout_options, index=layout_idx, key="crawl_dash_layout", horizontal=True)
+            with col_dash3:
+                # 정렬 순서 선택
+                sort_order_opts = ["높은 순위순", "낮은 순위순", "지표 높은순", "지표 낮은순"]
+                sort_order_val = saved_ui.get('dash_sort_order', "높은 순위순")
+                sort_order_idx = sort_order_opts.index(sort_order_val) if sort_order_val in sort_order_opts else 0
+                sort_order = st.selectbox("정렬 순서", sort_order_opts, index=sort_order_idx, key="dash_sort_order")
+            
+            # 해당 날짜의 데이터를 국가/기간 필터 적용하여 로드
+            conn = get_db_connection()
+            df_dash = pd.DataFrame()
+            
+            # 수집 기준에 따른 DB 정렬 최적화 및 실제 수치 지표 컬럼 결정
+            if "채널" in type_tab:
+                if selected_criteria == "조회수 순위":
+                    metric_column = "total_views"
+                else:
+                    metric_column = "subscriber_count"
+            else:
+                if selected_criteria == "조회수 순위":
+                    metric_column = "views"
+                elif selected_criteria == "좋아요 순위":
+                    metric_column = "likes"
+                elif selected_criteria == "댓글 순위":
+                    metric_column = "comments"
+                else:
+                    metric_column = "views"
+            
+            # 정렬 옵션 처리
+            is_high_rank = sort_order == "높은 순위순"
+            is_low_rank = sort_order == "낮은 순위순"
+            is_high_metric = sort_order == "지표 높은순"
+            is_low_metric = sort_order == "지표 낮은순"
+            
+            if is_high_rank:
+                order_clause = "rank ASC"
+            elif is_low_rank:
+                order_clause = "rank DESC"
+            elif is_high_metric:
+                order_clause = f"{metric_column} DESC, rank ASC"
+            elif is_low_metric:
+                order_clause = f"{metric_column} ASC, rank DESC"
+            
+            try:
+                if "쇼츠" in type_tab:
+                    df_dash = pd.read_sql_query(
+                        f"SELECT * FROM shorts_rank WHERE substr(crawled_at, 1, 10) = ? AND country = ? AND period = ? ORDER BY {order_clause}", 
+                        conn, params=(selected_date, selected_country, selected_period)
+                    )
+                elif "일반 영상" in type_tab:
+                    df_dash = pd.read_sql_query(
+                        f"SELECT * FROM videos_rank WHERE substr(crawled_at, 1, 10) = ? AND country = ? AND period = ? ORDER BY {order_clause}", 
+                        conn, params=(selected_date, selected_country, selected_period)
+                    )
+                elif "채널" in type_tab:
+                    df_dash = pd.read_sql_query(
+                        f"SELECT * FROM channels_rank WHERE substr(crawled_at, 1, 10) = ? AND country = ? AND period = ? ORDER BY {order_clause}", 
+                        conn, params=(selected_date, selected_country, selected_period)
+                    )
+            except Exception as load_err:
+                st.error(f"데이터 로드 실패: {load_err}")
+            finally:
+                conn.close()
+                
+            if df_dash.empty:
+                st.warning("선택한 세부 조건에 해당하는 크롤링 데이터가 없습니다.")
+            else:
+                # 카테고리 목록 추출 및 pills 컴포넌트 바인딩
+                raw_cats = df_dash["category"].unique()
+                categories_list = []
+                
+                # '전체' 카테고리가 존재한다면 맨 앞에 위치시킴
+                has_jeonche = False
+                for r_cat in raw_cats:
+                    if r_cat and r_cat.replace("batch_", "") == "전체":
+                        has_jeonche = True
+                        break
+                
+                if has_jeonche:
+                    categories_list.append("전체")
+                
+                # 그 다음 'All'을 배치
+                categories_list.append("All")
+                
+                # 나머지 카테고리들 추가
+                for r_cat in raw_cats:
+                    if r_cat:
+                        clean_cat = r_cat.replace("batch_", "")
+                        if clean_cat not in categories_list:
+                            categories_list.append(clean_cat)
+                
+                # 세션 상태 카테고리 디폴트 초기화
+                if 'dash_category_selected' not in st.session_state:
+                    st.session_state['dash_category_selected'] = 'All'
+                if st.session_state['dash_category_selected'] not in categories_list:
+                    st.session_state['dash_category_selected'] = categories_list[0] if categories_list else 'All'
+                    
+                selected_cat = st.pills(
+                    "카테고리 선택", 
+                    categories_list, 
+                    key="dash_category_selected"
+                )
+                if not selected_cat:
+                    selected_cat = st.session_state['dash_category_selected'] = categories_list[0] if categories_list else 'All'
+
+                # 카테고리별 데이터 개수 집계 테이블 렌더링
+                try:
+                    df_count_temp = df_dash.copy()
+                    df_count_temp['clean_category'] = df_count_temp['category'].apply(lambda x: x.replace("batch_", "") if x else "")
+                    counts = df_count_temp['clean_category'].value_counts()
+                    
+                    ordered_counts = []
+                    for c_name in categories_list:
+                        if c_name == "All":
+                            # All은 '전체'를 제외한 다른 개별 카테고리의 중복 제거된 총합 행 수
+                            df_all_temp = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"]
+                            if not df_all_temp.empty:
+                                if "채널" in type_tab:
+                                    all_val = len(df_all_temp.drop_duplicates(subset=["channel_name"], keep="last")) if "channel_name" in df_all_temp.columns else len(df_all_temp)
+                                else:
+                                    if "title" in df_all_temp.columns and "channel_name" in df_all_temp.columns:
+                                        all_val = len(df_all_temp.drop_duplicates(subset=["title", "channel_name"], keep="last"))
+                                    else:
+                                        all_val = len(df_all_temp)
+                            else:
+                                all_val = 0
+                            ordered_counts.append({"카테고리": "All (통합)", "데이터 개수": f"{all_val}개"})
+                        else:
+                            val = counts.get(c_name, 0)
+                            ordered_counts.append({"카테고리": c_name, "데이터 개수": f"{val}개"})
+                    
+                    if ordered_counts:
+                        df_counts_summary = pd.DataFrame(ordered_counts)
+                        with st.expander("📊 선택 날짜의 카테고리별 데이터 수집 개수 현황", expanded=True):
+                            st.dataframe(df_counts_summary, use_container_width=True, hide_index=True)
+                except Exception as tbl_err:
+                    logger.warning(f"카테고리별 데이터 개수 테이블 생성 실패: {tbl_err}")
+                
+                # 선택한 카테고리로 필터링
+                if selected_cat != "All":
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") == selected_cat]
+                else:
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"]
+                
+                # 모든 카테고리 필터 결과에서 중복 영상 제거 (동적 해시 방지 위해 타이틀/채널명 조합 활용)
+                if not df_filtered.empty:
+                    if "채널" in type_tab:
+                        if "channel_name" in df_filtered.columns:
+                            df_filtered = df_filtered.drop_duplicates(subset=["channel_name"], keep="last")
+                    else:
+                        if "title" in df_filtered.columns and "channel_name" in df_filtered.columns:
+                            df_filtered = df_filtered.drop_duplicates(subset=["title", "channel_name"], keep="last")
+                
+                # ⚙️ 디버그 정보 복사 기능 제공 (상단)
+                with st.expander("⚙️ 디버그 정보 복사 (JSON)", expanded=False):
+                    st.markdown("디버깅을 위해 아래의 JSON 데이터를 복사(우측 상단 📋 버튼 클릭)하여 AI 모델에게 전달해 주세요.")
+                    
+                    # 원본 CSV 파일 경로 추적
+                    calc_ranking_date = selected_date
+                    search_criteria = selected_criteria
+                    search_cat = selected_cat if selected_cat != "All" else "ALL"
+                    if search_cat != "ALL" and search_cat != "전체":
+                        search_cat = f"batch_{search_cat}"
+                    
+                    actual_target = "shorts"
+                    if "일반 영상" in type_tab:
+                        actual_target = "video"
+                    elif "채널" in type_tab:
+                        actual_target = "channel"
+                    
+                    existing_filepath = find_existing_batch_file(
+                        base_dir=Config.OUTPUT_DIR,
+                        target_type=actual_target,
+                        category=search_cat,
+                        country=selected_country,
+                        period=selected_period,
+                        criteria=search_criteria,
+                        ranking_date=calc_ranking_date
+                    )
+                    
+                    debug_file_path = existing_filepath if existing_filepath else "DB 직접 조회 (백업 파일 없음)"
+                    debug_file_name = os.path.basename(existing_filepath) if existing_filepath else "N/A"
+                    
+                    # 상위 1~10위 영상 데이터 축소 변환
+                    debug_items = []
+                    if not df_filtered.empty:
+                        top_df = df_filtered.head(10)
+                        for idx, (_, row) in enumerate(top_df.iterrows(), 1):
+                            title_val = row.get("title", row.get("channel_name", "N/A"))
+                            ch_val = row.get("channel_name", "N/A")
+                            rank_val = row.get("rank", idx)
+                            metric_val = 0
+                            if "채널" in type_tab:
+                                metric_val = row.get("total_views", row.get("subscriber_count", 0))
+                            else:
+                                if selected_criteria == "조회수 순위":
+                                    metric_val = row.get("views", 0)
+                                elif selected_criteria == "좋아요 순위":
+                                    metric_val = row.get("likes", 0)
+                                elif selected_criteria == "댓글 순위":
+                                    metric_val = row.get("comments", 0)
+                            
+                            debug_items.append({
+                                "순위": f"{rank_val}위",
+                                "제목/채널": title_val,
+                                "채널명": ch_val,
+                                "주요수치": metric_val,
+                                "카테고리": row.get("category", "N/A")
+                            })
+                    
+                    debug_json_data = {
+                        "디버그_실행시간": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "파라미터_선택값": {
+                            "수집날짜": selected_date,
+                            "데이터구분": type_tab,
+                            "카테고리": selected_cat,
+                            "수집기준": selected_criteria,
+                            "국가": selected_country,
+                            "기간": selected_period,
+                            "레이아웃": layout_style,
+                            "정렬순서": sort_order
+                        },
+                        "소스_파일경로": debug_file_path,
+                        "소스_파일명": debug_file_name,
+                        "상위_10개_영상목록": debug_items
+                    }
+                    
+                    # JSON을 화면에 출력하고 Streamlit의 네이티브 복사를 제공
+                    st.code(json.dumps(debug_json_data, ensure_ascii=False, indent=2), language="json")
+                
+                # 카드 호버 효과 및 보더 스타일 지정을 위한 CSS 주입 (Vibrant & Premium)
+                st.html("""
+                    <style>
+                    /* 캐러셀형 (그리드 카드) 스타일 */
+                    .dashboard-card {
+                        background-color: #1e1e24;
+                        border: 1px solid #2d2d34;
+                        border-radius: 12px;
+                        padding: 12px;
+                        margin-bottom: 15px;
+                        transition: all 0.3s ease-in-out;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                    }
+                    .dashboard-card:hover {
+                        transform: translateY(-5px);
+                        border-color: #ff4b4b;
+                        box-shadow: 0 10px 15px rgba(255, 75, 75, 0.2);
+                    }
+                    .rank-badge {
+                        background: linear-gradient(135deg, #ff4b4b, #ff8585);
+                        color: white;
+                        border-radius: 6px;
+                        padding: 2px 8px;
+                        font-weight: bold;
+                        font-size: 1.05em; /* 기존 0.85em에서 키움 */
+                        display: inline-block;
+                        margin-bottom: 5px;
+                    }
+                    .card-title {
+                        font-size: 1.25em; /* 리스트형(1.4em) 수준의 강력한 임팩트로 확대 */
+                        font-weight: bold;
+                        color: #ffffff;
+                        margin-top: 5px;
+                        margin-bottom: 5px;
+                        display: -webkit-box;
+                        -webkit-line-clamp: 2;
+                        -webkit-box-orient: vertical;
+                        overflow: hidden;
+                        height: 3.2em; /* 폰트 확대 대응 */
+                        line-height: 1.6em; /* 폰트 확대 대응 */
+                        cursor: pointer;
+                    }
+                    .card-title:hover {
+                        text-decoration: underline;
+                        opacity: 0.9;
+                    }
+                    .card-info {
+                        font-size: 0.95em; /* 기존 0.8em에서 키움 */
+                        color: #ffffff; /* 리스트형과 일치시키기 위해 어두운 회색에서 흰색으로 변경 */
+                    }
+                    .card-channel-name {
+                        font-weight: bold;
+                        color: #00d2ff !important; /* 리스트형의 형광 파란색 채널명과 완벽히 일치 */
+                        cursor: pointer;
+                    }
+                    .card-channel-name:hover {
+                        text-decoration: underline;
+                        opacity: 0.9;
+                    }
+                    
+                    /* 리스트형 (디자인 개편 적용) 스타일 */
+                    .list-card {
+                        background-color: #1e1e24; /* 기존 어두운 회색 배경으로 원복 */
+                        border: 1px solid #2d2d34; /* 테두리 복원 */
+                        border-radius: 14px;
+                        padding: 16px;
+                        margin-bottom: 15px;
+                        display: flex;
+                        align-items: center;
+                        transition: all 0.3s ease-in-out;
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+                    }
+                    .list-card:hover {
+                        transform: translateY(-3px);
+                        border-color: #007bff;
+                        box-shadow: 0 8px 20px rgba(0, 123, 255, 0.3);
+                    }
+                    .list-thumbnail-container {
+                        width: 240px; /* 썸네일 가로 폭 2배 확대 */
+                        height: 135px; /* 세로 크기도 비례해서 대폭 확대 */
+                        margin-right: 20px;
+                        flex-shrink: 0;
+                        border-radius: 10px;
+                        overflow: hidden;
+                    }
+                    .list-thumbnail {
+                        width: 100%;
+                        height: 100%;
+                        object-fit: cover;
+                    }
+                    .list-content {
+                        flex-grow: 1;
+                        min-width: 0;
+                    }
+                    .list-title {
+                        font-size: 1.4em; /* 제목 폰트 크기 확대 */
+                        font-weight: bold;
+                        color: #ffffff;
+                        margin-top: 5px;
+                        margin-bottom: 10px;
+                        display: -webkit-box;
+                        -webkit-line-clamp: 2;
+                        -webkit-box-orient: vertical;
+                        overflow: hidden;
+                        line-height: 1.4em;
+                        cursor: pointer;
+                    }
+                    .list-title:hover {
+                        text-decoration: underline;
+                        opacity: 0.9;
+                    }
+                    .list-badge {
+                        background-color: #0056b3; /* 순위 영역만 푸른색 단색 */
+                        color: white;
+                        border-radius: 8px;
+                        padding: 4px 12px;
+                        font-weight: bold;
+                        font-size: 1.4em; /* 순위 폰트 크기 확대 */
+                        margin-right: 20px;
+                        flex-shrink: 0;
+                        width: 110px;
+                        text-align: center;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                    }
+                    .list-info {
+                        font-size: 1.1em; /* 메타 정보 폰트 크기 확대 */
+                        color: #ffffff; /* 텍스트 흰색 설정 */
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 20px;
+                    }
+                    .list-channel-name {
+                        font-weight: bold;
+                        color: #00d2ff; /* 형광 파란색으로 가독성 확보 */
+                        cursor: pointer;
+                    }
+                    .list-channel-name:hover {
+                        text-decoration: underline;
+                        opacity: 0.9;
+                    }
+                    .list-metric {
+                        color: #ffffff; /* 조회수 폰트 흰색 */
+                    }
+                    
+                    /* 공통 스타일 */
+                    .card-info {
+                        font-size: 0.8em;
+                        color: #a0a0a5;
+                    }
+
+                    /* st.pills 및 st.radio 스타일 커스터마이즈 */
+                    div[data-baseweb="pill"], button[kind="pills"], button[kind="pillsActive"] {
+                        font-size: 1.25em !important;
+                        padding: 10px 20px !important;
+                        font-weight: bold !important;
+                        border-radius: 8px !important;
+                        transition: all 0.2s ease-in-out !important;
+                        border: 1px solid #4d4d54 !important;
+                        margin: 4px 6px !important;
+                        height: auto !important;
+                    }
+                    div[data-baseweb="pill"][aria-selected="true"], button[kind="pills"][aria-selected="true"], button[kind="pillsActive"] {
+                        background-color: #007bff !important;
+                        color: #ffffff !important;
+                        border-color: #00a2ff !important;
+                        box-shadow: 0 4px 15px rgba(0, 123, 255, 0.4) !important;
+                    }
+                    div[data-baseweb="pill"][aria-selected="false"], button[kind="pills"][aria-selected="false"], button[kind="pills"] {
+                        background-color: #31313a !important;
+                        color: #ffffff !important;
+                    }
+                    div[data-baseweb="pill"]:hover, button[kind="pills"]:hover, button[kind="pillsActive"]:hover {
+                        border-color: #007bff !important;
+                        transform: translateY(-2px) !important;
+                    }
+                    div[data-baseweb="pill"][aria-selected="false"]:hover, button[kind="pills"][aria-selected="false"]:hover, button[kind="pills"]:hover {
+                        background-color: #44444f !important;
+                    }
+                    div[data-baseweb="pill"][aria-selected="true"]:hover, button[kind="pills"][aria-selected="true"]:hover, button[kind="pillsActive"]:hover {
+                        background-color: #0056b3 !important;
+                        border-color: #00a2ff !important;
+                    }
+                    
+                    /* st.radio 가로 버튼 바 스타일링 */
+                    div[data-testid="stRadio"] div[role="radiogroup"] {
+                        flex-direction: row !important;
+                        gap: 10px !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label {
+                        background-color: #31313a !important;
+                        color: #ffffff !important;
+                        padding: 10px 20px !important;
+                        border-radius: 8px !important;
+                        border: 1px solid #4d4d54 !important;
+                        font-size: 1.25em !important;
+                        font-weight: bold !important;
+                        cursor: pointer !important;
+                        transition: all 0.2s ease-in-out !important;
+                        display: inline-flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        margin: 4px 6px !important;
+                        box-shadow: none !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {
+                        background-color: #007bff !important;
+                        color: #ffffff !important;
+                        border-color: #00a2ff !important;
+                        box-shadow: 0 4px 15px rgba(0, 123, 255, 0.4) !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label:hover {
+                        background-color: #44444f !important;
+                        border-color: #007bff !important;
+                        transform: translateY(-2px) !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked):hover {
+                        background-color: #0056b3 !important;
+                        border-color: #00a2ff !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label div[role="presentation"],
+                    div[data-testid="stRadio"] div[role="radiogroup"] label div[data-baseweb="radio"] {
+                        display: none !important;
+                    }
+                    div[data-testid="stRadio"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+                        margin-left: 0 !important;
+                    }
+                    div[data-testid="stRadio"] > label {
+                        font-size: 1.15em !important;
+                        font-weight: bold !important;
+                        color: #ffffff !important;
+                    }
+                    </style>
+                    
+                    <script>
+                    function performCopy(text) {
+                        if (navigator.clipboard && window.isSecureContext) {
+                            navigator.clipboard.writeText(text).then(function() {
+                                alert("📋 클립보드에 복사되었습니다:\n" + text);
+                            }).catch(function(err) {
+                                fallbackCopy(text);
+                            });
+                        } else {
+                            fallbackCopy(text);
+                        }
+                    }
+
+                    function fallbackCopy(text) {
+                        var textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        textArea.style.position = "fixed";
+                        textArea.style.left = "-999999px";
+                        textArea.style.top = "-999999px";
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try {
+                            var successful = document.execCommand('copy');
+                            if (successful) {
+                                alert("📋 클립보드에 복사되었습니다:\n" + text);
+                            } else {
+                                alert("❌ 복사 실패 (브라우저 제한)");
+                            }
+                        } catch (err) {
+                            console.error('fallback 복사 에러:', err);
+                            alert("❌ 복사 실패: " + err);
+                        }
+                        document.body.removeChild(textArea);
+                    }
+
+                    // 전역 및 부모 창에 바인딩하여 iframe 샌드박스 우회
+                    window.copyToClipboard = performCopy;
+                    if (window.parent) {
+                        window.parent.copyToClipboard = performCopy;
+                    }
+                    </script>
+                """)
+                
+                # JS 안전 문자열 정제 헬퍼 함수
+                def clean_js_text(text):
+                    if not text:
+                        return ""
+                    return str(text).replace('\\\\', '\\\\\\\\').replace("'", "\\\\'").replace('"', '&quot;').replace('\\n', ' ').replace('\\r', ' ')
+                
+                # 데이터 렌더링 헬퍼 함수
+                def render_layout(df_data, is_list_mode):
+                    if df_data.empty:
+                        st.info("해당 데이터가 존재하지 않습니다.")
+                        return
+                    
+                    if is_list_mode:
+                        # 리스트형 레이아웃 렌더링
+                        for idx, (_, row) in enumerate(df_data.iterrows()):
+                            img_url = ""
+                            if "쇼츠" in type_tab or "일반 영상" in type_tab:
+                                img_url = row.get("thumbnail_url", "")
+                            else:
+                                img_url = row.get("profile_url", "")
+                                
+                            if not img_url or img_url == "N/A" or not img_url.startswith("http"):
+                                img_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60"
+                                
+                            rank = row.get("rank", idx + 1)
+                            rank_change = row.get("rank_change", "N/A")
+                            title = row.get("title", row.get("channel_name", "이름 없음"))
+                            channel_name = row.get("channel_name", "N/A")
+                            views_val = row.get("views", 0)
+                            likes_val = row.get("likes", 0)
+                            comments_val = row.get("comments", 0)
+                            
+                            rc_display = ""
+                            if rank_change and rank_change != "N/A":
+                                if "▲" in rank_change or "+" in rank_change:
+                                    rc_display = f"<span style='color:#ff8585;'>{rank_change}</span>"
+                                elif "▼" in rank_change or "-" in rank_change:
+                                    rc_display = f"<span style='color:#85c4ff;'>{rank_change}</span>"
+                                else:
+                                    rc_display = f"<span style='color:#d0d0d5;'>{rank_change}</span>"
+                            else:
+                                rc_display = "-"
+                                
+                            # 메타 지표 및 순위별 노출 데이터 조정
+                            if "채널" in type_tab:
+                                sub_display = f"구독자: {row.get('subscriber_count', 'N/A')}"
+                                if isinstance(row.get('subscriber_count'), int):
+                                    sub_display = f"구독자: {row.get('subscriber_count', 0):,}"
+                                elif isinstance(row.get('subscriber_count'), str) and row.get('subscriber_count').isdigit():
+                                    sub_display = f"구독자: {int(row.get('subscriber_count')):,}"
+                                    
+                                views_display = f"누적 조회수: {row.get('total_views', 'N/A')}"
+                                if isinstance(row.get('total_views'), int):
+                                    views_display = f"누적 조회수: {row.get('total_views', 0):,}"
+                                
+                                meta_info = f"<span class='list-metric'>👥 {sub_display}</span><span class='list-metric'>📈 {views_display}</span>"
+                            else:
+                                # 수집 기준(조회수, 좋아요, 댓글)에 맞춰 렌더링 우선순위 표시
+                                views_formatted = f"{views_val:,}" if isinstance(views_val, int) else views_val
+                                likes_formatted = f"{likes_val:,}" if isinstance(likes_val, int) else likes_val
+                                comments_formatted = f"{comments_val:,}" if isinstance(comments_val, int) else comments_val
+                                
+                                meta_info = f"<span class='list-metric'>👁️ 조회수: {views_formatted}</span><span class='list-metric'>❤️ 좋아요: {likes_formatted}</span><span class='list-metric'>💬 댓글: {comments_formatted}</span>"
+                                
+                            raw_cat = row.get("category", "")
+                            clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
+                            
+                            safe_title = clean_js_text(title)
+                            safe_channel = clean_js_text(channel_name)
+                            
+                            list_content = f"""
+                            <div class="list-card">
+                                <span class="list-badge">{rank}위 ({rc_display})</span>
+                                <div class="list-thumbnail-container">
+                                    <img src="{img_url}" class="list-thumbnail" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
+                                </div>
+                                <div class="list-content">
+                                    <div class="list-title" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
+                                    <div class="list-info">
+                                        <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🏷️ {clean_cat}</span>
+                                        <span class="list-channel-name" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
+                                        {meta_info}
+                                    </div>
+                                </div>
+                            </div>
+                            """
+                            st.html(list_content)
+                    else:
+                        # 캐러셀형 (그리드 카드) 레이아웃 렌더링
+                        cols = st.columns(4)
+                        for idx, (_, row) in enumerate(df_data.iterrows()):
+                            col_idx = idx % 4
+                            with cols[col_idx]:
+                                img_url = ""
+                                if "쇼츠" in type_tab or "일반 영상" in type_tab:
+                                    img_url = row.get("thumbnail_url", "")
+                                else:
+                                    img_url = row.get("profile_url", "")
+                                    
+                                if not img_url or img_url == "N/A" or not img_url.startswith("http"):
+                                    img_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60"
+                                    
+                                rank = row.get("rank", idx + 1)
+                                rank_change = row.get("rank_change", "N/A")
+                                title = row.get("title", row.get("channel_name", "이름 없음"))
+                                channel_name = row.get("channel_name", "N/A")
+                                views_val = row.get("views", 0)
+                                likes_val = row.get("likes", 0)
+                                comments_val = row.get("comments", 0)
+                                
+                                rc_display = ""
+                                if rank_change and rank_change != "N/A":
+                                    if "▲" in rank_change or "+" in rank_change:
+                                        rc_display = f"<span style='color:#ff4b4b;'>{rank_change}</span>"
+                                    elif "▼" in rank_change or "-" in rank_change:
+                                        rc_display = f"<span style='color:#4b9eff;'>{rank_change}</span>"
+                                    else:
+                                        rc_display = f"<span style='color:#a0a0a5;'>{rank_change}</span>"
+                                else:
+                                    rc_display = "-"
+                                    
+                                if "채널" in type_tab:
+                                    sub_display = f"구독자: {row.get('subscriber_count', 'N/A')}"
+                                    if isinstance(row.get('subscriber_count'), int):
+                                        sub_display = f"구독자: {row.get('subscriber_count', 0):,}"
+                                    elif isinstance(row.get('subscriber_count'), str) and row.get('subscriber_count').isdigit():
+                                        sub_display = f"구독자: {int(row.get('subscriber_count')):,}"
+                                        
+                                    views_display = f"누적 조회수: {row.get('total_views', 'N/A')}"
+                                    if isinstance(row.get('total_views'), int):
+                                        views_display = f"누적 조회수: {row.get('total_views', 0):,}"
+                                    metric_html = f"<div class='card-info'>👥 {sub_display}<br>📈 {views_display}</div>"
+                                else:
+                                    views_formatted = f"{views_val:,}" if isinstance(views_val, int) else views_val
+                                    likes_formatted = f"{likes_val:,}" if isinstance(likes_val, int) else likes_val
+                                    comments_formatted = f"{comments_val:,}" if isinstance(comments_val, int) else comments_val
+                                    metric_html = f"<div class='card-info'>👁️ 조회수: {views_formatted}<br>❤️ 좋아요: {likes_formatted}<br>💬 댓글: {comments_formatted}</div>"
+                                
+                                raw_cat = row.get("category", "")
+                                clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
+                                
+                                safe_title = clean_js_text(title)
+                                safe_channel = clean_js_text(channel_name)
+                                
+                                card_content = f"""
+                                <div class="dashboard-card">
+                                    <span class="rank-badge">{rank}위 ({rc_display})</span>
+                                    <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🏷️ {clean_cat}</span>
+                                    <img src="{img_url}" style="width:100%; border-radius:8px; aspect-ratio:16/9; object-fit:cover; margin-bottom:8px;" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
+                                    <div class="card-title" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
+                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:5px;" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
+                                    {metric_html}
+                                </div>
+                                """
+                                st.html(card_content)
+                
+                # 레이아웃 모드 판정
+                is_list = "리스트" in layout_style
+                
+                # 렌더링 시작
+                if selected_cat == "All":
+                    # All 카테고리 선택 시에는 모든 카테고리를 하나의 단일 리스트로 일렬 병합하여 출력합니다.
+                    render_layout(df_filtered, is_list)
+                else:
+                    # 선택된 개별 카테고리(종합 "전체" 카테고리 포함) 단독 렌더링
+                    render_layout(df_filtered, is_list)
+                
+                # ⚙️ 디버그 정보 복사 기능 제공
+                with st.expander("⚙️ 디버그 정보 복사 (JSON)", expanded=False):
+                    st.markdown("디버깅을 위해 아래의 JSON 데이터를 복사(우측 상단 📋 버튼 클릭)하여 AI 모델에게 전달해 주세요.")
+                    
+                    # 원본 CSV 파일 경로 추적
+                    calc_ranking_date = selected_date
+                    search_criteria = selected_criteria
+                    search_cat = selected_cat if selected_cat != "All" else "ALL"
+                    if search_cat != "ALL" and search_cat != "전체":
+                        search_cat = f"batch_{search_cat}"
+                    
+                    actual_target = "shorts"
+                    if "일반 영상" in type_tab:
+                        actual_target = "video"
+                    elif "채널" in type_tab:
+                        actual_target = "channel"
+                    
+                    existing_filepath = find_existing_batch_file(
+                        base_dir=Config.OUTPUT_DIR,
+                        target_type=actual_target,
+                        category=search_cat,
+                        country=selected_country,
+                        period=selected_period,
+                        criteria=search_criteria,
+                        ranking_date=calc_ranking_date
+                    )
+                    
+                    debug_file_path = existing_filepath if existing_filepath else "DB 직접 조회 (백업 파일 없음)"
+                    debug_file_name = os.path.basename(existing_filepath) if existing_filepath else "N/A"
+                    
+                    # 상위 1~10위 영상 데이터 축소 변환
+                    debug_items = []
+                    if not df_filtered.empty:
+                        top_df = df_filtered.head(10)
+                        for idx, (_, row) in enumerate(top_df.iterrows(), 1):
+                            title_val = row.get("title", row.get("channel_name", "N/A"))
+                            ch_val = row.get("channel_name", "N/A")
+                            rank_val = row.get("rank", idx)
+                            metric_val = 0
+                            if "채널" in type_tab:
+                                metric_val = row.get("total_views", row.get("subscriber_count", 0))
+                            else:
+                                if selected_criteria == "조회수 순위":
+                                    metric_val = row.get("views", 0)
+                                elif selected_criteria == "좋아요 순위":
+                                    metric_val = row.get("likes", 0)
+                                elif selected_criteria == "댓글 순위":
+                                    metric_val = row.get("comments", 0)
+                            
+                            debug_items.append({
+                                "순위": f"{rank_val}위",
+                                "제목/채널": title_val,
+                                "채널명": ch_val,
+                                "주요수치": metric_val,
+                                "카테고리": row.get("category", "N/A")
+                            })
+                    
+                    debug_json_data = {
+                        "디버그_실행시간": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "파라미터_선택값": {
+                            "수집날짜": selected_date,
+                            "데이터구분": type_tab,
+                            "카테고리": selected_cat,
+                            "수집기준": selected_criteria,
+                            "국가": selected_country,
+                            "기간": selected_period,
+                            "레이아웃": layout_style,
+                            "정렬순서": sort_order
+                        },
+                        "소스_파일경로": debug_file_path,
+                        "소스_파일명": debug_file_name,
+                        "상위_10개_영상목록": debug_items
+                    }
+                    
+                    # JSON을 화면에 출력하고 Streamlit의 네이티브 복사를 제공
+                    st.code(json.dumps(debug_json_data, ensure_ascii=False, indent=2), language="json")
+                    
+    with crawl_sub_tabs[1]:
+        st.subheader("🔍 크롤링 데이터 상세 검색")
+        
+        if 'ui_settings' not in st.session_state or st.session_state['ui_settings'] is None:
+            st.session_state['ui_settings'] = load_settings()
+        saved_ui = st.session_state['ui_settings']
+        
+        col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
+        c_keyword = col_c1.text_input("검색 키워드 (제목, 채널명, 태그)", value=saved_ui.get("crawl_search_keyword", ""), key="crawl_search_keyword")
+        
+        c_type_options = ["전체", "shorts", "video", "channel"]
+        c_type_val = saved_ui.get("crawl_search_type", "전체")
+        c_type_idx = c_type_options.index(c_type_val) if c_type_val in c_type_options else 0
+        c_type = col_c2.selectbox("컨텐츠 타입", c_type_options, index=c_type_idx, key="crawl_search_type")
+        
+        c_sort_options = ["최근 등록일순", "조회수 높은순", "높은 순위순", "낮은 순위순"]
+        c_sort_val = saved_ui.get("crawl_search_sort", "최근 등록일순")
+        c_sort_idx = c_sort_options.index(c_sort_val) if c_sort_val in c_sort_options else 0
+        c_sort = col_c3.selectbox("정렬 기준", c_sort_options, index=c_sort_idx, key="crawl_search_sort")
+        
+        with st.expander("⚙️ 고급 필터"):
+            col_cf1, col_cf2 = st.columns(2)
+            c_view_min = col_cf1.number_input("최소 조회수", min_value=0, value=int(saved_ui.get("crawl_search_view_min", 0)), step=1000, key="crawl_search_view_min")
+            c_view_max = col_cf2.number_input("최대 조회수", min_value=0, value=int(saved_ui.get("crawl_search_view_max", 1000000000)), step=100000, key="crawl_search_view_max")
+            
+        c_search_btn = st.button("🔍 크롤링 데이터 검색 실행", use_container_width=True, key="crawl_search_btn")
+        
+        if c_search_btn or c_keyword:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                c_results = []
+                
+                if c_type in ["전체", "shorts"] and 'shorts_rank' in tables:
+                    cursor.execute('''
+                        SELECT 'shorts_rank' as source, video_id, title, channel_name,
+                               views, rank, category, country, crawled_at
+                        FROM shorts_rank
+                        WHERE (title LIKE ? OR channel_name LIKE ?) AND views >= ? AND views <= ?
+                    ''', (f'%{c_keyword}%', f'%{c_keyword}%', c_view_min, c_view_max))
+                    c_results.extend([dict(row) for row in cursor.fetchall()])
+                    
+                if c_type in ["전체", "video"] and 'videos_rank' in tables:
+                    cursor.execute('''
+                        SELECT 'videos_rank' as source, video_id, title, channel_name,
+                               views, rank, category, country, crawled_at
+                        FROM videos_rank
+                        WHERE (title LIKE ? OR channel_name LIKE ?) AND views >= ? AND views <= ?
+                    ''', (f'%{c_keyword}%', f'%{c_keyword}%', c_view_min, c_view_max))
+                    c_results.extend([dict(row) for row in cursor.fetchall()])
+                    
+                if c_type in ["전체", "channel"] and 'channels_rank' in tables:
+                    cursor.execute('''
+                        SELECT 'channels_rank' as source, channel_id as video_id, channel_name as title, channel_name,
+                               subscriber_count as views, rank, category, country, crawled_at
+                        FROM channels_rank
+                        WHERE channel_name LIKE ? AND subscriber_count >= ? AND subscriber_count <= ?
+                    ''', (f'%{c_keyword}%', c_view_min, c_view_max))
+                    c_results.extend([dict(row) for row in cursor.fetchall()])
+                    
+                conn.close()
+                
+                if c_results:
+                    df_c_res = pd.DataFrame(c_results)
+                    if c_sort == "최근 등록일순":
+                        df_c_res = df_c_res.sort_values(by="crawled_at", ascending=False)
+                    elif c_sort == "조회수 높은순":
+                        df_c_res = df_c_res.sort_values(by="views", ascending=False)
+                    elif c_sort == "높은 순위순":
+                        df_c_res = df_c_res.sort_values(by="rank", ascending=True)
+                    elif c_sort == "낮은 순위순":
+                        df_c_res = df_c_res.sort_values(by="rank", ascending=False)
+                        
+                    st.dataframe(df_c_res, use_container_width=True)
+                    st.success(f"🔍 검색 완료: 총 {len(df_c_res):,}건 발견")
+                else:
+                    st.warning("검색 조건에 일치하는 크롤링 데이터가 없습니다.")
+            except Exception as q_err:
+                st.error(f"조회 중 오류 발생: {q_err}")
+                
+    with crawl_sub_tabs[2]:
+        st.subheader("📊 크롤링 데이터 트렌드 시각화")
+        
+        tab_fig1, tab_fig2 = st.columns(2)
+        
+        with tab_fig1:
+            st.markdown("**인기 수집 카테고리 분포**")
+            try:
+                conn = get_db_connection()
+                df_cat_s = pd.read_sql_query("SELECT category, COUNT(*) as count FROM shorts_rank GROUP BY category", conn)
+                conn.close()
+                
+                if not df_cat_s.empty:
+                    df_cat_s['category'] = df_cat_s['category'].str.replace('batch_', '')
+                    fig = px.pie(df_cat_s, values='count', names='category', title='Shorts 수집 카테고리 비율', hole=.3)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("시각화할 Shorts 카테고리 데이터가 부족합니다.")
+            except:
+                st.info("데이터베이스 테이블 정보를 불러올 수 없습니다.")
+                
+        with tab_fig2:
+            st.markdown("**인기 채널 TOP 10 (구독자수 기준)**")
+            try:
+                conn = get_db_connection()
+                df_top_ch = pd.read_sql_query("""
+                    SELECT channel_name, MAX(subscriber_count) as subscribers 
+                    FROM channels_rank 
+                    WHERE channel_name != 'N/A'
+                    GROUP BY channel_name 
+                    ORDER BY subscribers DESC 
+                    LIMIT 10
+                """, conn)
+                conn.close()
+                
+                if not df_top_ch.empty:
+                    fig_bar = px.bar(
+                        df_top_ch, 
+                        x='subscribers', 
+                        y='channel_name', 
+                        orientation='h', 
+                        title='수집 채널 구독자수 TOP 10',
+                        labels={'subscribers': '구독자 수', 'channel_name': '채널명'}
+                    )
+                    fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("시각화할 채널 구독자 데이터가 부족합니다.")
+            except:
+                st.info("데이터베이스 테이블 정보를 불러올 수 없습니다.")
+
+# ==============================================================================
+# 탭 3: 🔍 API 연동데이터
+# ==============================================================================
+with tabs[2]:
+    st.header("🔍 YouTube API 연동데이터 조회")
+    
+    # 🗂️ API 연동 DB 현황
+    st.subheader("🗂️ API 연동 데이터 현황")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [r[0] for r in cursor.fetchall()]
+        
+        api_channels_count = 0
+        api_videos_count = 0
+        
         if 'api_channels' in tables:
             cursor.execute("SELECT COUNT(*) FROM api_channels")
             api_channels_count = cursor.fetchone()[0]
@@ -1338,186 +2414,149 @@ with tabs[1]:
             
         conn.close()
         
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Shorts 크롤링 건수", f"{shorts_count:,}건")
-        c2.metric("Long video 크롤링 건수", f"{videos_count:,}건")
-        c3.metric("채널 크롤링 건수", f"{channels_count:,}건")
-        c4.metric("API 연동 채널", f"{api_channels_count:,}개")
-        c5.metric("API 연동 영상", f"{api_videos_count:,}개")
+        c_api1, c_api2 = st.columns(2)
+        c_api1.metric("API 연동 채널 수", f"{api_channels_count:,}개")
+        c_api2.metric("API 연동 영상 수", f"{api_videos_count:,}개")
     except Exception as db_err:
         st.error(f"DB 현황 조회 에러: {db_err}")
         
     st.markdown("---")
     
-    st.subheader("🔍 데이터 통합 상세 검색")
+    api_sub_tabs = st.tabs(["🔍 API 데이터 상세 검색", "📊 API 데이터 시각화"])
     
-    if 'ui_settings' not in st.session_state or st.session_state['ui_settings'] is None:
-        st.session_state['ui_settings'] = load_settings()
-    saved_ui = st.session_state['ui_settings']
-
-    col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
-    search_keyword = col_s1.text_input("검색 키워드 (제목, 채널명, 태그)", value=saved_ui.get("search_keyword_val", ""), key="search_keyword_val")
-    
-    source_options = ["전체", "크롤링 데이터만", "API 연동 데이터만"]
-    source_val = saved_ui.get("search_source_val", "전체")
-    source_idx = source_options.index(source_val) if source_val in source_options else 0
-    search_source = col_s2.selectbox("데이터 소스", source_options, index=source_idx, key="search_source_val")
-    
-    type_options = ["전체", "shorts", "video", "channel"]
-    type_val = saved_ui.get("search_type_val", "전체")
-    type_idx = type_options.index(type_val) if type_val in type_options else 0
-    search_type = col_s3.selectbox("컨텐츠 타입", type_options, index=type_idx, key="search_type_val")
-    
-    with st.expander("⚙️ 고급 필터 및 정렬 설정"):
-        col_f1, col_f2, col_f3 = st.columns(3)
-        view_min = col_f1.number_input("최소 조회수", min_value=0, value=int(saved_ui.get("search_view_min", 0)), step=1000, key="search_view_min")
-        view_max = col_f1.number_input("최대 조회수", min_value=0, value=int(saved_ui.get("search_view_max", 1000000000)), step=100000, key="search_view_max")
+    with api_sub_tabs[0]:
+        st.subheader("🔍 API 연동 데이터 상세 검색")
         
-        default_date_from = saved_ui.get("search_date_from", datetime(2020, 1, 1).date())
-        default_date_to = saved_ui.get("search_date_to", datetime.today().date())
-        if isinstance(default_date_from, str):
-            try: default_date_from = datetime.strptime(default_date_from, '%Y-%m-%d').date()
-            except: default_date_from = datetime(2020, 1, 1).date()
-        if isinstance(default_date_to, str):
-            try: default_date_to = datetime.strptime(default_date_to, '%Y-%m-%d').date()
-            except: default_date_to = datetime.today().date()
-            
-        date_from = col_f2.date_input("게시일 시작 (API 데이터용)", value=default_date_from, key="search_date_from")
-        date_to = col_f2.date_input("게시일 종료 (API 데이터용)", value=default_date_to, key="search_date_to")
+        if 'ui_settings' not in st.session_state or st.session_state['ui_settings'] is None:
+            st.session_state['ui_settings'] = load_settings()
+        saved_ui = st.session_state['ui_settings']
         
-        sort_options = ["최근 등록일순", "조회수 높은순", "좋아요 비율 높은순"]
-        sort_val = saved_ui.get("search_sort_by", "최근 등록일순")
-        sort_idx = sort_options.index(sort_val) if sort_val in sort_options else 0
-        sort_by = col_f3.selectbox("정렬 기준", sort_options, index=sort_idx, key="search_sort_by")
+        col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
+        a_keyword = col_a1.text_input("검색 키워드 (제목, 채널명, 태그)", value=saved_ui.get("api_search_keyword", ""), key="api_search_keyword")
         
-    search_btn = st.button("🔍 조건 검색 실행", use_container_width=True, key="search_execute_btn")
-    
-    if search_btn or search_keyword:
-        st.subheader("📋 검색 결과")
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
+        a_type_options = ["전체", "shorts", "video"]
+        a_type_val = saved_ui.get("api_search_type", "전체")
+        a_type_idx = a_type_options.index(a_type_val) if a_type_val in a_type_options else 0
+        a_type = col_a2.selectbox("비디오 타입", a_type_options, index=a_type_idx, key="api_search_type")
+        
+        a_sort_options = ["최근 등록일순", "조회수 높은순", "좋아요 비율 높은순"]
+        a_sort_val = saved_ui.get("api_search_sort", "최근 등록일순")
+        a_sort_idx = a_sort_options.index(a_sort_val) if a_sort_val in a_sort_options else 0
+        a_sort = col_a3.selectbox("정렬 기준", a_sort_options, index=a_sort_idx, key="api_search_sort")
+        
+        with st.expander("⚙️ 고급 필터"):
+            col_af1, col_af2 = st.columns(2)
+            a_view_min = col_af1.number_input("최소 조회수", min_value=0, value=int(saved_ui.get("api_search_view_min", 0)), step=1000, key="api_search_view_min")
+            a_view_max = col_af1.number_input("최대 조회수", min_value=0, value=int(saved_ui.get("api_search_view_max", 1000000000)), step=100000, key="api_search_view_max")
             
-            results = []
+            default_a_date_from = saved_ui.get("api_search_date_from", datetime(2020, 1, 1).date())
+            default_a_date_to = saved_ui.get("api_search_date_to", datetime.today().date())
+            if isinstance(default_a_date_from, str):
+                try: default_a_date_from = datetime.strptime(default_a_date_from, '%Y-%m-%d').date()
+                except: default_a_date_from = datetime(2020, 1, 1).date()
+            if isinstance(default_a_date_to, str):
+                try: default_a_date_to = datetime.strptime(default_a_date_to, '%Y-%m-%d').date()
+                except: default_a_date_to = datetime.today().date()
+                
+            a_date_from = col_af2.date_input("게시일 시작", value=default_a_date_from, key="api_search_date_from")
+            a_date_to = col_af2.date_input("게시일 종료", value=default_a_date_to, key="api_search_date_to")
             
-            if search_source in ["전체", "크롤링 데이터만"]:
-                if search_type in ["전체", "shorts"] and 'shorts_rank' in tables:
-                    cursor.execute('''
-                        SELECT 'shorts_rank' as source, video_id, title, channel_name,
-                               views, rank, category, country, crawled_at
-                        FROM shorts_rank
-                        WHERE (title LIKE ? OR channel_name LIKE ?) AND views >= ? AND views <= ?
-                    ''', (f'%{search_keyword}%', f'%{search_keyword}%', view_min, view_max))
-                    results.extend([dict(row) for row in cursor.fetchall()])
-                if search_type in ["전체", "video"] and 'videos_rank' in tables:
-                    cursor.execute('''
-                        SELECT 'videos_rank' as source, video_id, title, channel_name,
-                               views, rank, category, country, crawled_at
-                        FROM videos_rank
-                        WHERE (title LIKE ? OR channel_name LIKE ?) AND views >= ? AND views <= ?
-                    ''', (f'%{search_keyword}%', f'%{search_keyword}%', view_min, view_max))
-                    results.extend([dict(row) for row in cursor.fetchall()])
-                if search_type in ["전체", "channel"] and 'channels_rank' in tables:
-                    cursor.execute('''
-                        SELECT 'channels_rank' as source, channel_id as video_id, channel_name as title, channel_name,
-                               subscriber_count as views, rank, category, country, crawled_at
-                        FROM channels_rank
-                        WHERE channel_name LIKE ? AND subscriber_count >= ? AND subscriber_count <= ?
-                    ''', (f'%{search_keyword}%', view_min, view_max))
-                    results.extend([dict(row) for row in cursor.fetchall()])
-                    
-            if search_source in ["전체", "API 연동 데이터만"]:
-                if search_type in ["전체", "shorts", "video"] and 'api_videos' in tables:
+        a_search_btn = st.button("🔍 API 데이터 검색 실행", use_container_width=True, key="api_search_btn")
+        
+        if a_search_btn or a_keyword:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                a_results = []
+                
+                if 'api_videos' in tables:
                     type_filter = ""
-                    if search_type == 'shorts':
+                    if a_type == 'shorts':
                         type_filter = "AND video_type = 'shorts'"
-                    elif search_type == 'video':
+                    elif a_type == 'video':
                         type_filter = "AND video_type = 'video'"
                         
                     cursor.execute(f'''
                         SELECT 'api_videos' as source, video_id, title, channel_name,
-                               view_count as views, 'N/A' as rank, category_name as category, '한국' as country, last_updated as crawled_at
+                               view_count as views, like_count as likes, category_name as category, 
+                               published_at, last_updated as crawled_at, video_type
                         FROM api_videos
                         WHERE (title LIKE ? OR channel_name LIKE ? OR tags LIKE ?) 
                               AND view_count >= ? AND view_count <= ? 
                               AND published_at >= ? AND published_at <= ?
                               {type_filter}
-                    ''', (f'%{search_keyword}%', f'%{search_keyword}%', f'%{search_keyword}%', view_min, view_max, f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z"))
-                    results.extend([dict(row) for row in cursor.fetchall()])
+                    ''', (f'%{a_keyword}%', f'%{a_keyword}%', f'%{a_keyword}%', a_view_min, a_view_max, f"{a_date_from}T00:00:00Z", f"{a_date_to}T23:59:59Z"))
+                    a_results = [dict(row) for row in cursor.fetchall()]
                     
-            conn.close()
-            
-            if results:
-                df_res = pd.DataFrame(results)
-                if sort_by == "최근 등록일순":
-                    df_res = df_res.sort_values(by="crawled_at", ascending=False)
-                elif sort_by == "조회수 높은순":
-                    df_res = df_res.sort_values(by="views", ascending=False)
+                conn.close()
                 
-                st.dataframe(df_res, use_container_width=True)
-                st.info(f"검색 결과: 총 {len(df_res):,}건 발견")
-            else:
-                st.warning("검색 조건에 맞는 데이터가 없습니다.")
-        except Exception as q_err:
-            st.error(f"조회 중 쿼리 오류: {q_err}")
-            logger.error("DB 상세 검색 조건 실행 중 예외 발생!", exc_info=True)
-            
-    st.markdown("---")
-    
-    st.subheader("📊 데이터 트렌드 시각화 분석")
-    
-    tab_fig1, tab_fig2 = st.columns(2)
-    
-    with tab_fig1:
-        st.markdown("**인기 수집 카테고리 분포**")
-        try:
-            conn = get_db_connection()
-            df_cat_s = pd.read_sql_query("SELECT category, COUNT(*) as count FROM shorts_rank GROUP BY category", conn)
-            conn.close()
-            
-            if not df_cat_s.empty:
-                fig = px.pie(df_cat_s, values='count', names='category', title='Shorts 수집 카테고리 비율', hole=.3)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("시각화할 Shorts 카테고리 데이터가 부족합니다.")
-        except:
-            st.info("데이터베이스 테이블 정보를 불러올 수 없습니다.")
-            
-    with tab_fig2:
-        st.markdown("**인기 채널 TOP 10 (구독자수 기준)**")
-        try:
-            conn = get_db_connection()
-            df_top_ch = pd.read_sql_query("""
-                SELECT channel_name, MAX(subscriber_count) as subscribers 
-                FROM channels_rank 
-                WHERE channel_name != 'N/A'
-                GROUP BY channel_name 
-                ORDER BY subscribers DESC 
-                LIMIT 10
-            """, conn)
-            conn.close()
-            
-            if not df_top_ch.empty:
-                fig_bar = px.bar(
-                    df_top_ch, 
-                    x='subscribers', 
-                    y='channel_name', 
-                    orientation='h', 
-                    title='수집 채널 구독자수 TOP 10',
-                    labels={'subscribers': '구독자 수', 'channel_name': '채널명'}
-                )
-                fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("시각화할 채널 구독자 데이터가 부족합니다.")
-        except:
-            st.info("데이터베이스 테이블 정보를 불러올 수 없습니다.")
-
+                if a_results:
+                    df_a_res = pd.DataFrame(a_results)
+                    
+                    if a_sort == "최근 등록일순":
+                        df_a_res = df_a_res.sort_values(by="published_at", ascending=False)
+                    elif a_sort == "조회수 높은순":
+                        df_a_res = df_a_res.sort_values(by="views", ascending=False)
+                    elif a_sort == "좋아요 비율 높은순":
+                        df_a_res['like_ratio'] = df_a_res.apply(lambda r: (r['likes'] / r['views'] * 100) if r['views'] > 0 and r['likes'] is not None else 0, axis=1)
+                        df_a_res = df_a_res.sort_values(by="like_ratio", ascending=False)
+                        
+                    st.dataframe(df_a_res, use_container_width=True)
+                    st.success(f"🔍 검색 완료: 총 {len(df_a_res):,}건 발견")
+                else:
+                    st.warning("검색 조건에 일치하는 API 연동 데이터가 없습니다.")
+            except Exception as q_err:
+                st.error(f"조회 중 오류 발생: {q_err}")
+                logger.error("API 데이터 검색 중 오류 발생", exc_info=True)
+                
+    with api_sub_tabs[1]:
+        st.subheader("📊 API 연동 데이터 시각화")
+        
+        col_afig1, col_afig2 = st.columns(2)
+        
+        with col_afig1:
+            st.markdown("**연동 비디오 타입 비율 (쇼츠 vs 일반)**")
+            try:
+                conn = get_db_connection()
+                df_api_types = pd.read_sql_query("SELECT video_type, COUNT(*) as count FROM api_videos GROUP BY video_type", conn)
+                conn.close()
+                
+                if not df_api_types.empty:
+                    fig_api_pie = px.pie(df_api_types, values='count', names='video_type', title='API 연동 비디오 타입 비율', hole=.3)
+                    st.plotly_chart(fig_api_pie, use_container_width=True)
+                else:
+                    st.info("시각화할 API 비디오 타입 데이터가 없습니다.")
+            except Exception as e:
+                st.info("데이터를 불러올 수 없습니다.")
+                
+        with col_afig2:
+            st.markdown("**API 연동 비디오 카테고리 분포**")
+            try:
+                conn = get_db_connection()
+                df_api_cats = pd.read_sql_query("SELECT category_name, COUNT(*) as count FROM api_videos GROUP BY category_name", conn)
+                conn.close()
+                
+                if not df_api_cats.empty:
+                    df_api_cats['category_name'] = df_api_cats['category_name'].fillna('N/A')
+                    fig_api_bar = px.bar(
+                        df_api_cats, 
+                        x='count', 
+                        y='category_name', 
+                        orientation='h', 
+                        title='API 연동 비디오 카테고리 분포',
+                        labels={'count': '영상 수', 'category_name': '카테고리명'}
+                    )
+                    fig_api_bar.update_layout(yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig_api_bar, use_container_width=True)
+                else:
+                    st.info("시각화할 API 비디오 카테고리 데이터가 없습니다.")
+            except Exception as e:
+                st.info("데이터를 불러올 수 없습니다.")
 
 # ==============================================================================
-# 탭 3: 🔌 API 동기화
+# 탭 4: 🔌 API 동기화
 # ==============================================================================
-with tabs[2]:
+with tabs[3]:
     st.header("🔌 YouTube API 연동 & 동기화")
     
     st.subheader("🔗 Zero-Cost 채널 URL 동기화")
@@ -1627,7 +2666,7 @@ with st.sidebar:
                         st.markdown(f"🎯 **대상**: {target_type} | 🌍 **국가**: {country}\n\n🔍 **기준**: {crawl_criteria} | ⏱️ **기간**: {period}")
                         st.markdown("---")
                         summary_records = []
-                        all_categories = [cat for cat in CATEGORIES if cat != '전체']
+                        all_categories = get_category_list()
                         
                         for cat in all_categories:
                             batch_cat_name = f"batch_{cat}"

@@ -81,13 +81,15 @@ class PlayboardCrawler:
         self.driver = None
         self.stop_requested = False
         self.resume_requested = False
+        self.skip_requested = False
+        self.current_category = '전체'
 
     def random_delay(self, min_val=0.5, max_val=1.5):
         """
         사람과 유사한 동작 모사를 위해 임의의 딜레이를 클릭/입력/동작 사이에 적용합니다.
         """
         delay = random.uniform(min_val, max_val)
-        logger.debug(f"[Delay] Sleeping for {delay:.2f} seconds to simulate human behavior...")
+        # logger.debug(f"[Delay] Sleeping for {delay:.2f} seconds to simulate human behavior...")
         time.sleep(delay)
 
     @staticmethod
@@ -285,6 +287,146 @@ class PlayboardCrawler:
         except Exception as e:
             logger.warning(f"Failed to configure ChromeDriver properties: {e}")
 
+    def _force_focus_os_window(self):
+        """
+        Windows OS 레벨에서 크롬 브라우저 창의 HWND를 획득하여
+        원래의 창 크기와 위치를 유지한 채 최소화 상태를 해제(Restore)하고 맨 앞으로 활성화합니다.
+        """
+        if os.name != 'nt':
+            return False
+            
+        try:
+            import ctypes
+            
+            # Win32 API 상수 선언
+            SW_RESTORE = 9
+            
+            # 현재 WebDriver가 제어하는 탭의 제목(Title) 획득
+            window_title = self.driver.title
+            if not window_title:
+                logger.debug("[Focus] Failed to retrieve window title.")
+                return False
+                
+            # FindWindowW를 사용하여 크롬 창 핸들(HWND) 획득
+            hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
+            if not hwnd:
+                logger.debug(f"[Focus] HWND not found for window title: {window_title}")
+                return False
+                
+            # 1. 윈도우가 최소화되어 있는지 판단 (IsIconic)
+            if ctypes.windll.user32.IsIconic(hwnd):
+                logger.info(f"[Focus] 브라우저 창이 최소화 상태로 감지되었습니다. OS 수준에서 복원(SW_RESTORE)을 지시합니다. (HWND: {hwnd})")
+                # ShowWindow(hwnd, SW_RESTORE) 호출로 원래 크기/위치대로 복원 유도
+                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                time.sleep(0.3)
+                
+            # 2. 강제로 Foreground 최상위 활성화 유도
+            logger.info(f"[Focus] OS 레벨 강제 브라우저 활성화 및 Foreground 포커싱을 수행합니다. (HWND: {hwnd})")
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.SetActiveWindow(hwnd)
+            return True
+        except Exception as e:
+            logger.warning(f"⚠ [Focus] OS-level force focus failed: {e}")
+    def _switch_criteria_tab(self, target_type, ranking_criteria):
+        """수집 기준 탭을 전환합니다."""
+        if target_type != 'channel' and ranking_criteria:
+            logger.info(f"[Criteria] 수집 기준 변경 시도: {ranking_criteria}")
+            try:
+                xpath = f"//li[contains(@class, 'item')]//span[contains(text(), '{ranking_criteria}')]"
+                tab_element = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tab_element)
+                self.random_delay(0.5, 1.0)
+                self.driver.execute_script("arguments[0].click();", tab_element)
+                logger.info(f"✓ [Criteria] 수집 기준을 '{ranking_criteria}'(으)로 전환 완료했습니다.")
+                self.random_delay(2.0, 3.0)
+            except Exception as tab_err:
+                logger.warning(f"⚠ [Criteria] 수집 기준 탭 '{ranking_criteria}' 전환 실패 (기본 설정으로 구동될 수 있음): {tab_err}")
+
+    def _select_ranking_date(self, use_specific_date, ranking_date):
+        """
+        과거 특정 날짜 혹은 기본 최신 날짜를 감지하여 클릭하고, 
+        실제 랭킹 기준 날짜를 추출하여 self.actual_ranking_date에 저장합니다.
+        """
+        self.actual_ranking_date = None
+        
+        # 1. 대상 날짜 문자열 계산 (use_specific_date=True일 때 1일 전 날짜 계산)
+        target_date_str = None
+        if use_specific_date and ranking_date:
+            try:
+                from datetime import datetime, timedelta
+                target_dt = datetime.strptime(ranking_date, "%Y-%m-%d") - timedelta(days=1)
+                target_date_str = target_dt.strftime("%Y.%m.%d")
+                logger.info(f"[Date Selection] 과거 특정 날짜 랭킹 수집 활성화: {ranking_date} (타겟 날짜: {target_date_str})")
+            except Exception as e:
+                logger.error(f"[Date Selection] 날짜 파싱/계산 실패: {e}")
+                
+        # 2. 브라우저에서 날짜 요소 탐색 및 클릭
+        try:
+            # '날짜' 그리드 영역 탐색
+            grid_xpath = "//div[contains(@class, 'grid')][.//h3[contains(@class, 'title__label') and contains(text(), '날짜')]]"
+            grid_element = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, grid_xpath))
+            )
+            
+            # 모든 날짜 항목들 탐색
+            items = grid_element.find_elements(By.CSS_SELECTOR, "li.item span.item__label")
+            if not items:
+                logger.warning("[Date Selection] 날짜 선택 리스트 요소를 찾지 못했습니다.")
+                return
+
+            clicked = False
+            selected_label = None
+
+            if target_date_str:
+                # 특정 날짜를 선택해야 하는 경우
+                for item in items:
+                    txt = item.text.strip()
+                    if target_date_str in txt:
+                        selected_label = txt
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", item)
+                        self.random_delay(0.5, 1.0)
+                        self.driver.execute_script("arguments[0].click();", item)
+                        logger.info(f"✓ [Date Selection] 타겟 날짜 요소를 클릭했습니다: '{txt}'")
+                        clicked = True
+                        self.random_delay(2.0, 3.0)
+                        break
+                if not clicked:
+                    logger.warning(f"⚠ [Date Selection] 타겟 날짜 '{target_date_str}'에 매칭되는 요소를 찾지 못했습니다. 기본 선택된 날짜로 유지합니다.")
+            else:
+                # 특정 날짜 모드가 아닐 때 (가장 최신 날짜를 선택해서 수집)
+                # 날짜 리스트 상의 가장 첫 번째 날짜 요소를 강제 클릭하여 확실하게 최신 랭킹 상태로 만듬
+                first_item = items[0]
+                selected_label = first_item.text.strip()
+                
+                logger.info(f"[Date Selection] 최신 날짜 수집 모드: 날짜 리스트 중 가장 최신 항목 클릭 시도: '{selected_label}'")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_item)
+                self.random_delay(0.5, 1.0)
+                self.driver.execute_script("arguments[0].click();", first_item)
+                logger.info(f"✓ [Date Selection] 가장 최신 날짜 요소를 클릭했습니다: '{selected_label}'")
+                self.random_delay(2.0, 3.0)
+
+            # 3. 클릭 완료되었거나 기본 상태에서, 최종 선택된 날짜의 라벨을 바탕으로 실제 ranking_date 도출
+            if not selected_label:
+                try:
+                    selected_el = grid_element.find_element(By.CSS_SELECTOR, "li.item--selected span.item__label")
+                    selected_label = selected_el.text.strip()
+                except:
+                    selected_label = items[0].text.strip()
+
+            # ' 2026.06.10.(수)' -> '2026-06-10' 변환
+            import re
+            match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})', selected_label)
+            if match:
+                self.actual_ranking_date = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                logger.info(f"✓ [Date Selection] 감지된 실제 데이터 랭킹 날짜: {self.actual_ranking_date}")
+            else:
+                logger.warning(f"[Date Selection] 날짜 라벨 '{selected_label}'에서 YYYY.MM.DD 포맷을 파싱하지 못했습니다.")
+                
+        except Exception as date_err:
+            logger.warning(f"⚠ [Date Selection] 날짜 요소 처리 중 예외 발생: {date_err}")
+
     def _check_login_wall(self):
         """
         [PLAN.md Phase 2.2] 로그인 월(Login Wall) 정밀 감지
@@ -348,7 +490,7 @@ class PlayboardCrawler:
         except Exception as e:
             logger.debug(f"Human scroll error: {e}")
 
-    def _scroll_to_load_items(self, target_count=100, max_attempts=None):
+    def _scroll_to_load_items(self, target_count=100, max_attempts=None, target_type='shorts', ranking_criteria='조회수 순위', use_specific_date=False, ranking_date=None):
         """
         무한 스크롤로 아이템 로딩 (Optimized JavaScript Scrolling)
         - div.current 순위 텍스트 최댓값을 분석하여 target_count 도달 여부 판정
@@ -369,6 +511,11 @@ class PlayboardCrawler:
             # 1. 프로세스 중단 요청 확인
             if self.stop_requested:
                 logger.warning("🛑 [System] 스크롤 루프 도중 프로세스 중단 요청이 감지되었습니다. 스크롤을 즉시 중단합니다.")
+                break
+
+            # 1.2. 카테고리 스킵 요청 확인
+            if getattr(self, 'skip_requested', False):
+                logger.warning("⏯️ [System] 스크롤 루프 도중 스킵 요청이 감지되었습니다. 현재 카테고리 수집을 중단합니다.")
                 break
 
             # 2. 로그인 벽 감지 (로그인 팝업이 떴는지 모니터링)
@@ -490,6 +637,23 @@ class PlayboardCrawler:
             # 이전 수집 상태와 변화 없음 감지
             if new_items_loaded == items_loaded:
                 no_change_count += 1
+                
+                # 스크롤 바닥(끝) 도달 여부 검사
+                try:
+                    is_at_bottom = self.driver.execute_script(
+                        "return (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 50);"
+                    )
+                except Exception as scroll_check_err:
+                    logger.debug(f"Failed to check scroll bottom: {scroll_check_err}")
+                    is_at_bottom = False
+
+                if is_at_bottom:
+                    logger.info(f"[Scroll] 스크롤 바닥(끝) 도달 감지 (현재 로드: {new_items_loaded}개)")
+                    # 바닥 상태에서 2회 연속 변화가 없으면 데이터의 끝으로 간주하고 알림 없이 루프 탈출
+                    if no_change_count >= 2:
+                        logger.info(f"✓ [Scroll] 스크롤 최하단 도달 상태에서 {no_change_count}회 연속 로딩 없음. 더 이상의 데이터가 없는 것으로 판단하여 수집을 종료하고 다음 단계로 진행합니다.")
+                        break
+
                 if new_items_loaded >= 20 and new_items_loaded <= 25 and no_change_count >= 2:
                     login_wall_detected = self._check_login_wall()
                     if login_wall_detected:
@@ -512,18 +676,145 @@ class PlayboardCrawler:
                 # [PLAN.md Phase 1.3.B] Wiggle Scrolling & Window Restore (JavaScript & Selenium API 사용)
                 # 3회 연속 변화 없음 시 (동일 개수 4회 반복) 브라우저 최대화 및 Wiggle을 통해 백그라운드 스로틀링 강제 해제
                 if no_change_count >= 3:
-                    logger.info(f"[Scroll] {no_change_count}회 연속 로딩 정체 감지. 백그라운드 지연 해제를 위해 기존 크기/위치를 유지한 채 브라우저 창 복원 및 활성화 시도...")
+                    logger.info(f"[Scroll] {no_change_count}회 연속 로딩 정체 감지. 백그라운드 지연 해제를 위해 창 복원 및 활성화를 시도하고 사용자에게 알림을 보냅니다...")
+                    
+                    # 1. Windows OS 레벨 ctypes 강제 복원 및 포커싱 시도
+                    focus_success = self._force_focus_os_window()
+                    
+                    if focus_success:
+                        logger.info("✓ [Scroll] ctypes Win32 API를 통해 브라우저 창 복원 및 활성화를 완료했습니다.")
+                    else:
+                        # 2. 폴백: 셀레늄 API를 이용해 강제로 기존 위치/크기를 재설정하여 최소화 해제 유도
+                        logger.debug("[Scroll] ctypes Win32 API 활성화 실패. 셀레늄 폴백 방식을 시도합니다.")
+                        try:
+                            rect = self.driver.get_window_rect()
+                            self.driver.set_window_rect(x=rect.get('x'), y=rect.get('y'), width=rect.get('width'), height=rect.get('height'))
+                            time.sleep(0.5)
+                            self.driver.switch_to.window(self.driver.current_window_handle)
+                            logger.info("✓ [Scroll] 셀레늄 폴백 방식을 통해 브라우저 창 활성화를 시도했습니다.")
+                        except Exception as fallback_err:
+                            logger.debug(f"Selenium window restore fallback failed: {fallback_err}")
+                            
+                    # 3. 브라우저 내부 콘텐츠 활성화를 위한 focus 주입
                     try:
-                        # 기존 창 크기 및 위치 획득
-                        rect = self.driver.get_window_rect()
-                        # 강제로 동일한 위치와 크기를 다시 설정하여 최소화 상태 해제(Restore) 유도
-                        self.driver.set_window_rect(x=rect.get('x'), y=rect.get('y'), width=rect.get('width'), height=rect.get('height'))
-                        time.sleep(0.5)
-                        self.driver.switch_to.window(self.driver.current_window_handle)
                         self.driver.execute_script("window.focus();")
-                        logger.info("✓ [Scroll] 기존 창 크기 및 위치를 유지하며 브라우저 창 복원 및 활성화를 완료했습니다.")
-                    except Exception as focus_err:
-                        logger.debug(f"Failed to restore/focus browser window: {focus_err}")
+                        logger.info("✓ [Scroll] window.focus()를 통해 브라우저 내부 활성화 자극을 완료했습니다.")
+                    except Exception as body_err:
+                        logger.debug(f"Failed to focus window script: {body_err}")
+                        
+                    # 4. 사용자에게 수동 활성화 요청 알림 전송 및 추가 요소 로드 대기 (방어선)
+                    cat_info = f"'{self.current_category}' " if getattr(self, 'current_category', None) else ""
+                    logger.warning(f"⚠ [Scroll] 수집 정체가 {no_change_count}회째 지속되어 대기 모드에 진입합니다. 사용자 수동 개입 알림을 발송합니다.")
+                    try:
+                        play_notification_sound()
+                        show_notification(
+                            "[수집 대기] 자동화 브라우저 창을 활성화해 주세요",
+                            f"카테고리 {cat_info}수집 중 정체가 감지되었습니다. 브라우저 창을 클릭하거나 화면 앞으로 띄워 추가 데이터가 로드되도록 해주세요."
+                        )
+                    except Exception as alert_err:
+                        logger.warning(f"Failed to send manual focus request notification: {alert_err}")
+                    
+                    logger.info("⏳ [Scroll] 사용자가 자동화 브라우저 창을 직접 활성화하여 추가 요소가 로드될 때까지 무한 대기 중... (대시보드에서 프로세스 중단 가능)")
+                    wait_start = time.time()
+                    last_log_time = time.time()
+                    
+                    last_wiggle_time = time.time()
+                    focus_start_time = None
+                    should_refresh_and_retry = False
+                    
+                    while True:
+                        if self.stop_requested:
+                            logger.warning("🛑 [Scroll] 대기 중 프로세스 중단 요청이 감지되었습니다.")
+                            break
+
+                        # 4.1. 사용자가 수동 재개를 누른 경우 -> 해당 카테고리 새로고침 후 다시 처음부터 수집 시작
+                        if getattr(self, 'resume_requested', False):
+                            logger.info("⏯️ [Scroll] 사용자 수동 재개 요청 감지! 카테고리를 새로고침(F5)하여 처음부터 다시 수집을 시작합니다.")
+                            self.resume_requested = False
+                            should_refresh_and_retry = True
+                            break
+
+                        # 4.2. 사용자가 다음 카테고리 스킵을 누른 경우 -> 대기 루프 탈출
+                        if getattr(self, 'skip_requested', False):
+                            logger.warning("⏯️ [Scroll] 사용자 다음 카테고리 스킵 요청 감지! 현재 카테고리 수집을 건너뜁니다.")
+                            break
+                        
+                        # 1. 브라우저 창이 활성화(포커스)되었는지 확인
+                        try:
+                            is_focused = self.driver.execute_script("return document.hasFocus();")
+                        except Exception as e:
+                            logger.debug(f"Failed to check document focus: {e}")
+                            is_focused = False
+                        
+                        if not is_focused:
+                            focus_start_time = None
+                            # 활성화되지 않은 경우, 5초마다 로그 출력하며 대기
+                            if time.time() - last_log_time >= 5.0:
+                                elapsed = int(time.time() - wait_start)
+                                logger.info(f"⏳ [Scroll] 자동화 브라우저 창 활성화 대기 중... (경과: {elapsed}초, 브라우저를 활성화해 주세요)")
+                                last_log_time = time.time()
+                            time.sleep(0.5)
+                            continue
+                        
+                        if focus_start_time is None:
+                            focus_start_time = time.time()
+                        
+                        # 2. 활성화된 경우, 추가 로드 유도를 위한 주기적 wiggle 스크롤 시도 (2초 간격)
+                        if time.time() - last_wiggle_time >= 2.0:
+                            try:
+                                logger.debug("[Scroll] 브라우저 활성화 감지. 추가 로드 유도를 위한 자동 Wiggle 스크롤 수행...")
+                                self.driver.execute_script("window.scrollBy(0, -150);")
+                                time.sleep(0.2)
+                                self.driver.execute_script("window.scrollBy(0, 150);")
+                            except Exception as wiggle_err:
+                                logger.debug(f"Wiggle failed during wait: {wiggle_err}")
+                            last_wiggle_time = time.time()
+                        
+                        # 3. DOM에 로드된 행의 수 다시 체크
+                        try:
+                            current_rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.chart__row")
+                            if len(current_rows) > len(rows):
+                                logger.info(f"✓ [Scroll] 추가 요소 로드 감지 완료! (기존 행: {len(rows)} -> 신규 행: {len(current_rows)}) 대기를 해제하고 크롤링을 재개합니다.")
+                                # 정체 카운트와 수집 상태 갱신 및 탈출
+                                no_change_count = 0
+                                items_loaded = new_items_loaded
+                                break
+                                
+                            # 활성화 상태에서 15초가 경과했는데도 추가 요소를 로드하지 못하면 (스크롤의 끝) F5 새로고침 후 다시 시도
+                            if time.time() - focus_start_time >= 15.0:
+                                logger.warning("⚠️ [Scroll] 브라우저가 활성화되었으나 15초간 추가 로드를 수행하지 못했습니다 (스크롤 끝 도달 추정).")
+                                logger.warning("F5(새로고침)을 실행하여 처음부터 다시 수집을 시도합니다...")
+                                should_refresh_and_retry = True
+                                break
+                        except Exception as check_err:
+                            logger.debug(f"Failed to check rows count during wait: {check_err}")
+                        
+                        # 활성화 상태에서도 5초마다 로그 출력
+                        if time.time() - last_log_time >= 5.0:
+                            elapsed = int(time.time() - wait_start)
+                            logger.info(f"⏳ [Scroll] 브라우저 활성화됨. 추가 데이터가 로드되기를 기다리는 중... (경과: {elapsed}초)")
+                            last_log_time = time.time()
+                            
+                        time.sleep(0.5)
+
+                    # 새로고침 후 스크롤 재설정 동작 수행
+                    if should_refresh_and_retry:
+                        try:
+                            self.driver.refresh()
+                            time.sleep(3)
+                            self._switch_criteria_tab(target_type, ranking_criteria)
+                            self._select_ranking_date(use_specific_date, ranking_date)
+                            rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.chart__row")
+                            no_change_count = 0
+                            items_loaded = len(rows)
+                            attempts = 0  # 시도 횟수도 리셋하여 처음부터 다시 크롤링
+                            continue
+                        except Exception as refresh_err:
+                            logger.error(f"Failed to refresh and retry scroll: {refresh_err}")
+
+                    if getattr(self, 'skip_requested', False):
+                        # 스킵 요청 시 무한 대기 루프를 탈출한 후 메인 attempts 루프도 break 하도록 설정
+                        break
 
                     logger.info(f"[Scroll] Wiggle attempt at {new_items_loaded} items...")
                     try:
@@ -718,7 +1009,7 @@ class PlayboardCrawler:
 
         return 'N/A'
 
-    def crawl(self, url, target_type='shorts', login_mode=False, target_count=None, country='한국', period='일간', ranking_date=None, ranking_criteria='조회수 순위', start_rank=0, keep_open=False, category='전체'):
+    def crawl(self, url, target_type='shorts', login_mode=False, target_count=None, country='한국', period='일간', ranking_date=None, ranking_criteria='조회수 순위', start_rank=0, keep_open=False, category='전체', use_specific_date=False):
         """
         통합 크롤링 메서드
 
@@ -741,6 +1032,7 @@ class PlayboardCrawler:
             target_count = Config.MAX_ITEMS_WITH_LOGIN if login_mode else Config.MAX_ITEMS_NO_LOGIN
 
         try:
+            self.current_category = category
             self._init_driver()
             logger.info(f"Starting crawl: {url}")
             logger.info(f"Target type: {target_type}, Login: {login_mode}, Count: {target_count}")
@@ -769,28 +1061,16 @@ class PlayboardCrawler:
                     return pd.DataFrame()
 
             # 탭 클릭을 통한 수집 기준 변경 (조회수 순위, 좋아요 순위, 댓글 순위)
-            # 채널 랭킹은 탭 목록이 다르거나 없을 수 있으므로 video/shorts 일 때만 동작
-            if target_type != 'channel' and ranking_criteria:
-                logger.info(f"[Criteria] 수집 기준 변경 시도: {ranking_criteria}")
-                try:
-                    # 앞뒤 공백이 존재할 수 있으므로 contains 매칭 활용
-                    xpath = f"//li[contains(@class, 'item')]//span[contains(text(), '{ranking_criteria}')]"
-                    tab_element = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, xpath))
-                    )
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tab_element)
-                    self.random_delay(0.5, 1.0)
-                    self.driver.execute_script("arguments[0].click();", tab_element)
-                    logger.info(f"✓ [Criteria] 수집 기준을 '{ranking_criteria}'(으)로 전환 완료했습니다.")
-                    
-                    # 탭 전환 후 데이터 갱신을 위해 대기
-                    self.random_delay(2.0, 3.0)
-                except Exception as tab_err:
-                    logger.warning(f"⚠ [Criteria] 수집 기준 탭 '{ranking_criteria}' 전환 실패 (기본 설정으로 구동될 수 있음): {tab_err}")
+            self._switch_criteria_tab(target_type, ranking_criteria)
+
+            # 과거 특정 날짜 혹은 기본 최신 날짜 요소를 찾아 클릭하고 감지
+            self._select_ranking_date(use_specific_date, ranking_date)
+            if getattr(self, 'actual_ranking_date', None):
+                ranking_date = self.actual_ranking_date
 
             # 스크롤하여 데이터 로드
-            items_loaded = self._scroll_to_load_items(target_count)
-            if self.stop_requested:
+            items_loaded = self._scroll_to_load_items(target_count, target_type=target_type, ranking_criteria=ranking_criteria, use_specific_date=use_specific_date, ranking_date=ranking_date)
+            if self.stop_requested or getattr(self, 'skip_requested', False):
                 return pd.DataFrame()
 
             # 페이지 소스 파싱
@@ -803,7 +1083,11 @@ class PlayboardCrawler:
                 logger.warning("⚠ [Warning] No elements ('tr.chart__row') found on page. Attempting page refresh to reload...")
                 self.driver.refresh()
                 time.sleep(3)
-                items_loaded = self._scroll_to_load_items(target_count)
+                self._switch_criteria_tab(target_type, ranking_criteria)
+                self._select_ranking_date(use_specific_date, ranking_date)
+                if getattr(self, 'actual_ranking_date', None):
+                    ranking_date = self.actual_ranking_date
+                items_loaded = self._scroll_to_load_items(target_count, target_type=target_type, ranking_criteria=ranking_criteria, use_specific_date=use_specific_date, ranking_date=ranking_date)
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
                 rows = soup.select('table.sheet tbody tr.chart__row')
                 retry_attempted = True

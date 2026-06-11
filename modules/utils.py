@@ -267,14 +267,12 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, cri
     safe_period = sanitize_filename(period)
 
     # 타임스탬프 추가 (PLAN.md 4.2 - 가독성 개선)
-    timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-
-    # 파일명 생성
+    # 파일명 생성 시 시간단위 제거하고 Ranking Date (date_folder)만 붙도록 수정
     if criteria:
         safe_criteria = sanitize_filename(criteria)
-        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{safe_criteria}_{timestamp}.{extension}"
+        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{safe_criteria}_{date_folder}.{extension}"
     else:
-        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{timestamp}.{extension}"
+        filename = f"{safe_target}_{safe_category}_{safe_country}_{safe_period}_{date_folder}.{extension}"
 
     # 전체 경로 (날짜별 폴더 내부에 저장)
     filepath = os.path.join(target_dir, filename)

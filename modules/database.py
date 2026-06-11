@@ -420,7 +420,14 @@ class DatabaseHandler:
                 views = parse_count_string(row.get('Views', 0))
                 likes = parse_count_string(row.get('Likes', 0))
                 comments = parse_count_string(row.get('Comments', 0))
-                crawled_at = datetime.now().isoformat()
+                # row의 'Ranking Date' 컬럼 값을 파싱하여 crawled_at으로 사용 (없을 시 현재시각 fallback)
+                ranking_date_val = row.get('Ranking Date', None)
+                if ranking_date_val and ranking_date_val != 'N/A':
+                    crawled_at = str(ranking_date_val).strip()
+                    if len(crawled_at) == 10:
+                        crawled_at = f"{crawled_at}T12:00:00"
+                else:
+                    crawled_at = datetime.now().isoformat()
 
                 # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
                 cursor.execute('''
@@ -519,7 +526,14 @@ class DatabaseHandler:
                 views = parse_count_string(row.get('Views', 0))
                 likes = parse_count_string(row.get('Likes', 0))
                 comments = parse_count_string(row.get('Comments', 0))
-                crawled_at = datetime.now().isoformat()
+                # row의 'Ranking Date' 컬럼 값을 파싱하여 crawled_at으로 사용 (없을 시 현재시각 fallback)
+                ranking_date_val = row.get('Ranking Date', None)
+                if ranking_date_val and ranking_date_val != 'N/A':
+                    crawled_at = str(ranking_date_val).strip()
+                    if len(crawled_at) == 10:
+                        crawled_at = f"{crawled_at}T12:00:00"
+                else:
+                    crawled_at = datetime.now().isoformat()
 
                 # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
                 cursor.execute('''
@@ -629,7 +643,14 @@ class DatabaseHandler:
 
                 video_count = int(row.get('Video Count', 0)) if row.get('Video Count') else 0
                 ranking_type = row.get('Ranking Type', '')
-                crawled_at = datetime.now().isoformat()
+                # row의 'Ranking Date' 컬럼 값을 파싱하여 crawled_at으로 사용 (없을 시 현재시각 fallback)
+                ranking_date_val = row.get('Ranking Date', None)
+                if ranking_date_val and ranking_date_val != 'N/A':
+                    crawled_at = str(ranking_date_val).strip()
+                    if len(crawled_at) == 10:
+                        crawled_at = f"{crawled_at}T12:00:00"
+                else:
+                    crawled_at = datetime.now().isoformat()
 
                 # 중복 체크: 같은 channel_id + category + country + period + ranking_type 존재 시 업데이트
                 cursor.execute('''
