@@ -1638,7 +1638,7 @@ with tabs[1]:
                     
                     if ordered_counts:
                         df_counts_summary = pd.DataFrame(ordered_counts)
-                        with st.expander("📊 선택 날짜의 카테고리별 데이터 수집 개수 현황", expanded=True):
+                        with st.expander("📊 선택 날짜의 카테고리별 데이터 수집 개수 현황", expanded=False):
                             st.dataframe(df_counts_summary, use_container_width=True, hide_index=True)
                 except Exception as tbl_err:
                     logger.warning(f"카테고리별 데이터 개수 테이블 생성 실패: {tbl_err}")
@@ -2009,6 +2009,18 @@ with tabs[1]:
                     if (window.parent) {
                         window.parent.copyToClipboard = performCopy;
                     }
+
+                    // Streamlit HTML Sanitizer 우회용 이벤트 리스너 바인딩
+                    document.addEventListener('click', function(e) {
+                        var copyTarget = e.target.closest('[title="클릭 시 복사"]');
+                        if (copyTarget) {
+                            var text = copyTarget.getAttribute('data-copy-text');
+                            if (text && window.copyToClipboard) {
+                                window.copyToClipboard(text);
+                                e.preventDefault();
+                            }
+                        }
+                    });
                     </script>
                 """)
                 
@@ -2089,10 +2101,10 @@ with tabs[1]:
                                     <img src="{img_url}" class="list-thumbnail" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
                                 </div>
                                 <div class="list-content">
-                                    <div class="list-title" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
+                                    <div class="list-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
                                     <div class="list-info">
                                         <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🏷️ {clean_cat}</span>
-                                        <span class="list-channel-name" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
+                                        <span class="list-channel-name" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
                                         {meta_info}
                                     </div>
                                 </div>
@@ -2161,8 +2173,8 @@ with tabs[1]:
                                     <span class="rank-badge">{rank}위 ({rc_display})</span>
                                     <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🏷️ {clean_cat}</span>
                                     <img src="{img_url}" style="width:100%; border-radius:8px; aspect-ratio:16/9; object-fit:cover; margin-bottom:8px;" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
-                                    <div class="card-title" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
-                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:5px;" title="클릭 시 복사" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
+                                    <div class="card-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
+                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:5px;" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
                                     {metric_html}
                                 </div>
                                 """
