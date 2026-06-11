@@ -91,10 +91,22 @@ def get_db_connection():
 # ==============================================================================
 # Helper: 기존 오늘 날짜의 중간 수집 파일 검색
 # ==============================================================================
-def find_existing_batch_file(base_dir, target_type, category, country, period, criteria=None):
-    """오늘 날짜 폴더 내에 이미 수집된 특정 조건의 최신 CSV 파일 경로를 탐색합니다. (정규식 기반 윈도우 호환성 보장)"""
+def find_existing_batch_file(base_dir, target_type, category, country, period, criteria=None, ranking_date=None):
+    """지정된 랭킹 날짜 폴더 내에 이미 수집된 특정 조건의 최신 CSV 파일 경로를 탐색합니다. (정규식 기반 윈도우 호환성 보장)"""
     import re
-    date_folder = datetime.now().strftime('%Y_%m_%d')
+    if ranking_date:
+        try:
+            # YYYY-MM-DD 또는 YYYY/MM/DD 등의 포맷을 YYYY_MM_DD로 치환
+            clean_date = ranking_date.replace('-', '_').replace('/', '_')
+            if re.match(r'^\d{4}_\d{2}_\d{2}$', clean_date):
+                date_folder = clean_date
+            else:
+                date_folder = datetime.now().strftime('%Y_%m_%d')
+        except Exception as e:
+            logger.warning(f"Failed to parse ranking_date {ranking_date}: {e}")
+            date_folder = datetime.now().strftime('%Y_%m_%d')
+    else:
+        date_folder = datetime.now().strftime('%Y_%m_%d')
     
     if 'shorts' in target_type.lower():
         type_folder = 'Shorts'
@@ -492,7 +504,8 @@ with tabs[0]:
                 category=category,
                 country=country,
                 period=period,
-                criteria=crawl_criteria
+                criteria=crawl_criteria,
+                ranking_date=specific_date
             )
             
             already_collected = 0
@@ -504,7 +517,8 @@ with tabs[0]:
                     pass
             
             if already_collected == 0:
-                st.info(f"📂 **[신규 파일 생성]** 오늘 자 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
+                date_label = f"'{specific_date}' 기준" if use_specific_date else "오늘 자"
+                st.info(f"📂 **[신규 파일 생성]** {date_label} 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
             elif already_collected >= crawl_limit:
                 st.success(f"✓ **[수집 완료 건너뜀]** 이미 **{already_collected}**개가 수집되어 목표치({crawl_limit}개)를 충족했습니다. 크롤링을 건너뜁니다.")
             else:
@@ -525,7 +539,8 @@ with tabs[0]:
                     category=batch_cat_name,
                     country=country,
                     period=period,
-                    criteria=crawl_criteria
+                    criteria=crawl_criteria,
+                    ranking_date=specific_date
                 )
                 
                 already_collected = 0
@@ -656,7 +671,8 @@ with tabs[0]:
                         category=category,
                         country=country,
                         period=period,
-                        criteria=crawl_criteria
+                        criteria=crawl_criteria,
+                        ranking_date=ranking_date
                     )
                     
                     already_collected = 0
@@ -773,7 +789,8 @@ with tabs[0]:
                                 category=batch_cat_name,
                                 country=country,
                                 period=period,
-                                criteria=crawl_criteria
+                                criteria=crawl_criteria,
+                                ranking_date=ranking_date
                             )
                             
                             already_collected = 0
@@ -877,7 +894,8 @@ with tabs[0]:
                                 category=batch_cat_name,
                                 country=country,
                                 period=period,
-                                criteria=crawl_criteria
+                                criteria=crawl_criteria,
+                                ranking_date=ranking_date
                             )
                             collected_count = 0
                             if filepath and os.path.exists(filepath):
