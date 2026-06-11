@@ -486,7 +486,7 @@ class DatabaseHandler:
                         crawled_at,
                         crawled_at
                     ))
-                    logger.debug(f"Inserted new short: {video_id}")
+                    # logger.debug(f"Inserted new short: {video_id}")
 
                 count += 1
 

@@ -213,7 +213,7 @@ def ensure_directory_exists(directory_path):
         return False
 
 
-def generate_safe_filepath(base_dir, target_type, category, country, period, criteria=None, extension='csv'):
+def generate_safe_filepath(base_dir, target_type, category, country, period, criteria=None, ranking_date=None, extension='csv'):
     """
     안전한 파일 경로 생성
 
@@ -224,6 +224,7 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, cri
         country (str): 국가
         period (str): 기간
         criteria (str, optional): 수집 기준 (예: 조회수 순위, 좋아요 순위, 댓글 순위)
+        ranking_date (str, optional): 랭킹 날짜 (예: YYYY-MM-DD)
         extension (str): 확장자 (기본값: 'csv')
 
     Returns:
@@ -234,7 +235,17 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, cri
 
     # PLAN.md Phase 3.2 - 날짜별 폴더링 추가
     # output/2026_01_04/ 형식으로 저장
-    date_folder = datetime.now().strftime('%Y_%m_%d')
+    if ranking_date:
+        try:
+            clean_date = ranking_date.replace('-', '_').replace('/', '_')
+            if re.match(r'^\d{4}_\d{2}_\d{2}$', clean_date):
+                date_folder = clean_date
+            else:
+                date_folder = datetime.now().strftime('%Y_%m_%d')
+        except Exception:
+            date_folder = datetime.now().strftime('%Y_%m_%d')
+    else:
+        date_folder = datetime.now().strftime('%Y_%m_%d')
     
     # 타입별 서브 폴더링 (Shorts, Video, Channel)
     if 'shorts' in target_type.lower():

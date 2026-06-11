@@ -509,20 +509,30 @@ class PlayboardCrawler:
 
                 # [PLAN.md Phase 1.3.B] Wiggle Scrolling (JavaScript 사용)
                 # 3회 연속 변화 없음 시 (동일 개수 4회 반복) Wiggle 및 브라우저 강제 포커싱을 통해 백그라운드 스로틀링 해제
+                # [PLAN.md Phase 1.3.B] Wiggle Scrolling & Window Restore (JavaScript & Selenium API 사용)
+                # 3회 연속 변화 없음 시 (동일 개수 4회 반복) 브라우저 최대화 및 Wiggle을 통해 백그라운드 스로틀링 강제 해제
                 if no_change_count >= 3:
-                    logger.info(f"[Scroll] Wiggle attempt at {new_items_loaded} items (no_change: {no_change_count})...")
-                    self.driver.execute_script("window.scrollBy(0, -200);")
-                    self.random_delay(0.1, 0.3)
-                    self.driver.execute_script("window.scrollBy(0, 200);")
-                    self.random_delay(0.4, 0.7)
-
-                    logger.info(f"[Scroll] {no_change_count}회 연속 로딩 정체 감지. 백그라운드 지연 해제를 위해 브라우저 강제 포커싱 시도...")
+                    logger.info(f"[Scroll] {no_change_count}회 연속 로딩 정체 감지. 백그라운드 지연 해제를 위해 기존 크기/위치를 유지한 채 브라우저 창 복원 및 활성화 시도...")
                     try:
+                        # 기존 창 크기 및 위치 획득
+                        rect = self.driver.get_window_rect()
+                        # 강제로 동일한 위치와 크기를 다시 설정하여 최소화 상태 해제(Restore) 유도
+                        self.driver.set_window_rect(x=rect.get('x'), y=rect.get('y'), width=rect.get('width'), height=rect.get('height'))
+                        time.sleep(0.5)
                         self.driver.switch_to.window(self.driver.current_window_handle)
                         self.driver.execute_script("window.focus();")
-                        logger.info("✓ [Scroll] 브라우저 창을 포커싱 완료했습니다.")
+                        logger.info("✓ [Scroll] 기존 창 크기 및 위치를 유지하며 브라우저 창 복원 및 활성화를 완료했습니다.")
                     except Exception as focus_err:
-                        logger.debug(f"Failed to focus browser window: {focus_err}")
+                        logger.debug(f"Failed to restore/focus browser window: {focus_err}")
+
+                    logger.info(f"[Scroll] Wiggle attempt at {new_items_loaded} items...")
+                    try:
+                        self.driver.execute_script("window.scrollBy(0, -200);")
+                        self.random_delay(0.1, 0.3)
+                        self.driver.execute_script("window.scrollBy(0, 200);")
+                    except Exception as scroll_err:
+                        logger.debug(f"Failed to execute wiggle scroll: {scroll_err}")
+                    self.random_delay(0.4, 0.7)
 
                 # [PLAN.md Phase 1.3.B] 10회 연속 변화 없음 시 중단
                 if no_change_count >= 10:
@@ -660,23 +670,18 @@ class PlayboardCrawler:
                 try:
                     # 원래 페이지로 돌아가기
                     self.driver.get(original_url)
-                    time.sleep(3)
+                    time.sleep(2)
                 except Exception as restore_err:
                     logger.error(f"Failed to restore original url {original_url}: {restore_err}")
                 
-                # 플레이보드에서 로그인 성공 여부 검사
-                if self._check_login_status_by_element():
-                    logger.info("✓ [System] 수동 재개 성공: 로그인이 확인되었습니다.")
+                # 사용자 수동 입력에 기반한 무조건 재개 정책 적용
+                logger.info("✓ [System] 수동 재개 성공: 사용자 재개 신호에 기반하여 크롤링을 즉시 진행합니다.")
+                try:
                     self.driver.execute_script("window.scrollTo(0, 0);")
-                    time.sleep(1)
-                    return True
-                else:
-                    logger.warning("⚠ [System] 수동 재개 실패: 아직 로그인이 완료되지 않았거나 세션 로드가 되지 않았습니다. 로그인 페이지로 재이동합니다.")
-                    try:
-                        self.driver.get("https://playboard.co/account/signin")
-                        time.sleep(2)
-                    except:
-                        pass
+                except:
+                    pass
+                time.sleep(1)
+                return True
 
             elapsed = int(time.time() - start_time)
             remaining = max_wait_time - elapsed
