@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(mkdir:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "Bash(pip install:*)",
+      "Bash(venvScripts:*)",
+      "Bash(venv\\Scripts\\pip install aiohttp gspread google-auth google-auth-oauthlib google-auth-httplib2 brotli)",
+      "Bash(install_packages_en.bat)",
+      "Bash(cmd:*)",
+      "Bash(where python)",
+      "Bash(C:UsersalmaAppDataLocalProgramsPythonPython310python.exe -c \"import aiohttp; print(''Python 3.10에 aiohttp 설치됨:'', aiohttp.__version__)\")",
+      "Bash(py:*)",
+      "Bash(pip show:*)",
+      "Bash(del:*)",
+      "Bash(rm:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(nul)"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%USERPROFILE%\\.claude\\notify.ps1\" -Title \"Claude Code 완료\" -Message \"작업이 완료되었습니다 ✅\" -SoundFile \"Windows Notify Email.wav\""
+          }
+        ]
+      }
+    ]
+  }
+}

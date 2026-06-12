@@ -369,6 +369,31 @@ class YouTubeManager:
 
         result['channel_id'] = channel_id
 
+        # DB에 기존 채널 정보가 이미 존재하면 추가 수집하지 않고 패스(중복 방지)
+        try:
+            conn = self._get_connection()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM sheet_channels WHERE channel_id = ?', (channel_id,))
+            existing_channel = cursor.fetchone()
+            conn.close()
+            if existing_channel:
+                logger.info(f"✓ Channel {channel_id} already exists in DB. Syncing skipped (Duplicate Bypass).")
+                result['success'] = True
+                row_dict = dict(existing_channel)
+                result['data'] = {
+                    'channel_id': row_dict.get('channel_id'),
+                    'title': row_dict.get('channel_name', ''),
+                    'subscriber_count': row_dict.get('subscribers', 0),
+                    'view_count': row_dict.get('total_channel_views', 0),
+                    'video_count': row_dict.get('total_video_count', 0),
+                    'uploads_playlist_id': f"UU{channel_id[2:]}",  # Zero-cost UU 변환 적용
+                    'crawled_url': row_dict.get('channel_link', '')
+                }
+                return result
+        except Exception as db_chk_err:
+            logger.error(f"Failed to check existing channel in DB: {db_chk_err}")
+
         # 2. API 사용 가능 여부 확인
         logger.debug("Checking API availability...")
         if not self.youtube:
@@ -419,8 +444,12 @@ class YouTubeManager:
                 'subscriber_count': int(statistics.get('subscriberCount', 0)),
                 'view_count': int(statistics.get('viewCount', 0)),
                 'video_count': int(statistics.get('videoCount', 0)),
-                'uploads_playlist_id': content_details.get('relatedPlaylists', {}).get('uploads', ''),
-                'crawled_url': channel_url
+                'uploads_playlist_id': content_details.get('relatedPlaylists', {}).get('uploads', f"UU{channel_id[2:]}"),
+                'crawled_url': channel_url or f"https://www.youtube.com/channel/{channel_id}",
+                'channel_handle': snippet.get('customUrl', ''),
+                'created_at': snippet.get('publishedAt', ''),
+                'description': snippet.get('description', ''),
+                'channel_country': snippet.get('country', '')
             }
 
             logger.debug(f"Extracted data - title: {data['title']}, subs: {data['subscriber_count']:,}, videos: {data['video_count']}")
@@ -448,98 +477,53 @@ class YouTubeManager:
         return result
 
     def _save_channel(self, data: dict):
-        """채널 데이터 DB 저장 (기존 playlist_source, crawled_url 보존)"""
+        """채널 데이터를 sheet_channels 테이블에 저장"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
-            # First check if the channel exists and has crawled_url='playlist'
-            cursor.execute('SELECT crawled_url, playlist_source FROM api_channels WHERE channel_id = ?', (data['channel_id'],))
+            cursor.execute("PRAGMA table_info(sheet_channels)")
+            db_cols = [col[1] for col in cursor.fetchall()]
+
+            row_dict = {
+                'channel_id': data['channel_id'],
+                'channel_name': data['title'],
+                'subscribers': data['subscriber_count'],
+                'total_channel_views': data['view_count'],
+                'total_video_count': data['video_count'],
+                'channel_link': data['crawled_url'],
+                'crawl_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'channel_description': data.get('description', ''),
+                'channel_handle': data.get('channel_handle', ''),
+                'created_at': data.get('created_at', ''),
+                'channel_country': data.get('channel_country', ''),
+                'is_fetched': 'ㅇ'
+            }
+
+            # existing data check for original_row_order
+            cursor.execute("SELECT original_row_order FROM sheet_channels WHERE channel_id = ?", (data['channel_id'],))
             existing = cursor.fetchone()
-            
-            # Preserve crawled_url='playlist' and playlist_source if they exist
-            if existing and existing['crawled_url'] == 'playlist':
-                # Update existing playlist channel - preserve crawled_url and playlist_source
-                cursor.execute('''
-                    UPDATE api_channels SET
-                        title = ?,
-                        thumbnail_url = ?,
-                        subscriber_count = ?,
-                        view_count = ?,
-                        video_count = ?,
-                        uploads_playlist_id = ?,
-                        last_updated = ?,
-                        last_synced_at = ?,
-                        sync_status = 'synced'
-                    WHERE channel_id = ?
-                ''', (
-                    data['title'],
-                    data['thumbnail_url'],
-                    data['subscriber_count'],
-                    data['view_count'],
-                    data['video_count'],
-                    data['uploads_playlist_id'],
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat(),
-                    data['channel_id']
-                ))
+            if existing and existing[0]:
+                row_dict['original_row_order'] = existing[0]
             else:
-                # New channel - insert with full data
-                cursor.execute('''
-                    INSERT INTO api_channels (
-                        channel_id, title, thumbnail_url,
-                        subscriber_count, view_count, video_count,
-                        uploads_playlist_id, crawled_url, last_updated,
-                        last_synced_at, sync_status
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-                    ON CONFLICT(channel_id) DO UPDATE SET
-                        title = excluded.title,
-                        thumbnail_url = excluded.thumbnail_url,
-                        subscriber_count = excluded.subscriber_count,
-                        view_count = excluded.view_count,
-                        video_count = excluded.video_count,
-                        uploads_playlist_id = excluded.uploads_playlist_id,
-                        last_updated = excluded.last_updated,
-                        last_synced_at = excluded.last_synced_at,
-                        sync_status = 'synced'
-                ''', (
-                    data['channel_id'],
-                    data['title'],
-                    data['thumbnail_url'],
-                    data['subscriber_count'],
-                    data['view_count'],
-                    data['video_count'],
-                    data['uploads_playlist_id'],
-                    data['crawled_url'],
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                ))
+                cursor.execute("SELECT MAX(original_row_order) FROM sheet_channels")
+                max_order = cursor.fetchone()[0]
+                row_dict['original_row_order'] = (max_order or 9) + 1
+
+            columns = [c for c in row_dict.keys() if c in db_cols]
+            placeholders = ', '.join(['?'] * len(columns))
+            sql = f"INSERT OR REPLACE INTO sheet_channels ({', '.join(columns)}) VALUES ({placeholders})"
+            cursor.execute(sql, [row_dict[col] for col in columns])
             conn.commit()
-            logger.debug(f"Channel saved: {data['channel_id']}")
+            logger.debug(f"Channel saved to sheet_channels: {data['channel_id']}")
         except Exception as e:
-            logger.error(f"Channel save error: {e}")
+            logger.error(f"Channel save error to sheet_channels: {e}")
         finally:
             conn.close()
 
-    def fetch_videos(self, channel_id: str, limit: int = 50, fetch_all: bool = False) -> dict:
+    def fetch_videos(self, channel_id: str = None, playlist_id: str = None, limit: int = 50, fetch_all: bool = False, since_year: int = None, sync_channel_info: bool = False, tab_name: str = "영상 리스트") -> dict:
         """
-        채널의 영상 목록 수집 (uploads 플레이리스트) - PLAN.md Deep Data 수집
-
-        Args:
-            channel_id: YouTube Channel ID
-            limit: 수집할 영상 수 (최대)
-            fetch_all: True일 경우 limit 무시하고 전체 영상 수집 (PLAN.md)
-
-        Returns:
-            dict: {
-                'success': bool,
-                'videos': list,
-                'shorts_count': int,
-                'video_count': int,
-                'quota_used': int,
-                'error': str
-            }
+        채널 또는 재생목록의 영상 목록 수집 - sheet_videos 저장용
         """
         result = {
             'success': False,
@@ -554,30 +538,63 @@ class YouTubeManager:
             result['error'] = 'YouTube API not initialized'
             return result
 
-        # 1. uploads 플레이리스트 ID 및 채널 데이터 조회 (PLAN.md - Deep Data 계산용)
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            'SELECT uploads_playlist_id, subscriber_count, title FROM api_channels WHERE channel_id = ?',
-            (channel_id,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        # 1. 대상 플레이리스트 ID 획득
+        channel_data = None
+        if channel_id:
+            # sheet_channels 테이블에서 채널 정보 및 uploads_playlist_id 추출 시도
+            conn = self._get_connection()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT channel_name as title, subscribers as subscriber_count FROM sheet_channels WHERE channel_id = ?',
+                (channel_id,)
+            )
+            row = cursor.fetchone()
+            conn.close()
 
-        if not row or not row['uploads_playlist_id']:
-            # 채널 동기화 필요
-            result['error'] = f'Channel not synced: {channel_id}'
+            if not row:
+                if sync_channel_info:
+                    # 채널 동기화 실행
+                    sync_res = self.sync_channel(f"https://www.youtube.com/channel/{channel_id}")
+                    result['quota_used'] += sync_res['quota_used']
+                    if sync_res['success']:
+                        channel_data = {
+                            'subscriber_count': sync_res['data']['subscriber_count'],
+                            'title': sync_res['data']['title']
+                        }
+                else:
+                    result['error'] = f'Channel not synced in DB: {channel_id}'
+                    return result
+            else:
+                channel_data = {
+                    'subscriber_count': row['subscriber_count'],
+                    'title': row['title']
+                }
+
+            playlist_id = f"UU{channel_id[2:]}"  # uploads playlist ID
+        elif playlist_id:
+            # 재생목록의 영상들을 직접 가져오는 경우
+            channel_id = None
+        else:
+            result['error'] = 'Either channel_id or playlist_id must be provided'
             return result
 
-        playlist_id = row['uploads_playlist_id']
-        channel_data = {
-            'subscriber_count': row['subscriber_count'],
-            'title': row['title']
-        }
+        # DB에 존재하는 기존 영상 ID들 미리 획득 (중복 제외용)
+        existing_video_ids = set()
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT video_id FROM sheet_videos")
+            existing_video_ids = {row[0] for row in cursor.fetchall() if row[0]}
+            conn.close()
+            logger.info(f"Duplicate Check: Found {len(existing_video_ids)} video IDs in sheet_videos DB.")
+        except Exception as db_err:
+            logger.error(f"Failed to fetch existing video IDs for duplicate check: {db_err}")
 
-        # 2. 플레이리스트 아이템 조회 (1 unit per page) - PLAN.md: fetch_all 지원
+        # 2. 플레이리스트 아이템 조회
         video_ids = []
         next_page_token = None
+        stop_by_year = False
 
         try:
             while True:
@@ -603,13 +620,34 @@ class YouTubeManager:
                 result['quota_used'] += 1
 
                 for item in response.get('items', []):
-                    video_id = item.get('contentDetails', {}).get('videoId')
+                    content_details = item.get('contentDetails', {})
+                    video_id = content_details.get('videoId')
+                    video_pub_at = content_details.get('videoPublishedAt')
+
+                    # 연도 필터링: 지정 연도 이전 영상이 발견되면 수집 중단
+                    if since_year and video_pub_at:
+                        try:
+                            # YYYY-MM-DD
+                            pub_year = int(video_pub_at[:4])
+                            if pub_year < since_year:
+                                logger.info(f"Stop suiting: Video published at {video_pub_at} is older than since_year {since_year}")
+                                stop_by_year = True
+                                break
+                        except Exception as parse_err:
+                            logger.warning(f"Failed to parse videoPublishedAt year: {parse_err}")
+
                     if video_id:
+                        if video_id in existing_video_ids:
+                            logger.debug(f"Video {video_id} already exists in DB, skipping.")
+                            continue
                         video_ids.append(video_id)
+
+                if stop_by_year:
+                    break
 
                 next_page_token = response.get('nextPageToken')
                 if not next_page_token:
-                    break  # 더 이상 페이지 없음
+                    break
 
             # 3. 영상 상세 정보 조회 (50개씩 배치)
             videos = []
@@ -629,7 +667,20 @@ class YouTubeManager:
                 result['quota_used'] += 1
 
                 for video_data in video_response.get('items', []):
-                    video = self._parse_video_data(video_data, channel_id, channel_data)
+                    v_channel_id = video_data.get('snippet', {}).get('channelId')
+                    
+                    # 연쇄적인 채널 정보 수집 활성화 시
+                    v_channel_data = channel_data
+                    if sync_channel_info and v_channel_id and not channel_id:
+                        sync_res = self.sync_channel(f"https://www.youtube.com/channel/{v_channel_id}")
+                        result['quota_used'] += sync_res['quota_used']
+                        if sync_res['success']:
+                            v_channel_data = {
+                                'subscriber_count': sync_res['data']['subscriber_count'],
+                                'title': sync_res['data']['title']
+                            }
+
+                    video = self._parse_video_data(video_data, v_channel_id, v_channel_data)
                     videos.append(video)
 
                     if video['video_type'] == 'shorts':
@@ -638,7 +689,7 @@ class YouTubeManager:
                         result['video_count'] += 1
 
             # 4. DB 저장
-            self._save_videos(videos)
+            self._save_videos(videos, tab_name=tab_name)
 
             result['success'] = True
             result['videos'] = videos
@@ -766,16 +817,194 @@ class YouTubeManager:
             'analysis_summary': None
         }
 
-    def _save_videos(self, videos: list):
-        """영상 데이터 일괄 저장 - PLAN.md Deep Data 사용"""
+    def _save_videos(self, videos: list, tab_name="영상 리스트"):
+        """영상 데이터 일괄 저장 - sheet_videos 테이블 구조로 변환 후 UPSERT"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
         try:
-            from modules.database import DatabaseHandler
-            db = DatabaseHandler(self.db_path)
-            for video in videos:
-                db.upsert_api_video_deep(video)
-            logger.debug(f"Saved {len(videos)} videos to DB (Deep Data)")
+            cursor.execute("PRAGMA table_info(sheet_videos)")
+            db_cols = [col[1] for col in cursor.fetchall()]
+
+            from modules.utils import calculate_sheet_video_metrics
+            from modules.youtube_utils import format_duration
+
+            inserted_count = 0
+            for idx, v in enumerate(videos):
+                row_dict = {
+                    'video_id': v['video_id'],
+                    'channel_id': v['channel_id'],
+                    'title': v['title'],
+                    'video_link': v['video_link'],
+                    'channel_name': v['channel_name'],
+                    'views': v['view_count'],
+                    'likes': v['like_count'],
+                    'comments': v['comment_count'],
+                    'duration': format_duration(v['duration_sec']),
+                    'is_shorts': 'ㅇ' if v['video_type'] == 'shorts' else 'x',
+                    'thumbnail_link': v['thumbnail_url'],
+                    'description': v['description'],
+                    'category_id': v['category_id'],
+                    'tab_name': tab_name,
+                    'crawl_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+
+                # YYYY-MM-DD 포맷 변환
+                if v.get('published_at'):
+                    row_dict['upload_date'] = v['published_at'][:10]
+
+                # 기존 original_row_order 검색 및 보존
+                cursor.execute("SELECT original_row_order FROM sheet_videos WHERE video_id = ? AND tab_name = ?", (v['video_id'], tab_name))
+                existing = cursor.fetchone()
+                if existing and existing[0]:
+                    row_dict['original_row_order'] = existing[0]
+                else:
+                    cursor.execute("SELECT MAX(original_row_order) FROM sheet_videos WHERE tab_name = ?", (tab_name,))
+                    max_order = cursor.fetchone()[0]
+                    row_dict['original_row_order'] = (max_order or 9) + 1
+
+                # 파이썬 기반 통계 계산
+                row_dict = calculate_sheet_video_metrics(row_dict)
+
+                columns = [c for c in row_dict.keys() if c in db_cols]
+                placeholders = ', '.join(['?'] * len(columns))
+                sql = f"INSERT OR REPLACE INTO sheet_videos ({', '.join(columns)}) VALUES ({placeholders})"
+                cursor.execute(sql, [row_dict[col] for col in columns])
+                inserted_count += 1
+
+            conn.commit()
+            logger.debug(f"Saved {inserted_count} videos to sheet_videos DB (Deep Data)")
         except Exception as e:
             logger.error(f"Videos save error: {e}")
+        finally:
+            conn.close()
+
+    def fetch_single_video(self, video_id: str, sync_channel_info: bool = False) -> dict:
+        """단일 영상 상세 정보 조회 및 sheet_videos 저장"""
+        result = {
+            'success': False,
+            'videos': [],
+            'quota_used': 0,
+            'error': None
+        }
+
+        if not self.youtube:
+            result['error'] = 'YouTube API not initialized'
+            return result
+
+        if not self.quota_tracker.can_make_request('videos.list'):
+            result['error'] = 'API quota exceeded'
+            return result
+
+        try:
+            logger.info(f"Calling videos.list API for single video_id: {video_id}")
+            response = self.youtube.videos().list(
+                part='snippet,contentDetails,statistics',
+                id=video_id
+            ).execute()
+
+            self.quota_tracker.log_usage('videos.list', 1)
+            result['quota_used'] += 1
+
+            if not response.get('items'):
+                result['error'] = f'Video not found: {video_id}'
+                return result
+
+            video_data = response['items'][0]
+            channel_id = video_data.get('snippet', {}).get('channelId')
+
+            channel_data = None
+            if channel_id:
+                if sync_channel_info:
+                    sync_res = self.sync_channel(f"https://www.youtube.com/channel/{channel_id}")
+                    result['quota_used'] += sync_res['quota_used']
+                    if sync_res['success']:
+                        channel_data = {
+                            'subscriber_count': sync_res['data']['subscriber_count'],
+                            'title': sync_res['data']['title']
+                        }
+                else:
+                    # DB에서 채널 정보 읽기 시도
+                    conn = self._get_connection()
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT subscribers as subscriber_count, channel_name as title FROM sheet_channels WHERE channel_id = ?", (channel_id,))
+                    row = cursor.fetchone()
+                    conn.close()
+                    if row:
+                        channel_data = dict(row)
+
+            video = self._parse_video_data(video_data, channel_id, channel_data)
+
+            # DB 저장
+            self._save_videos([video], tab_name="영상 리스트")
+
+            # 채널 메트릭스 최신화
+            if channel_id:
+                self.update_channel_metrics(channel_id)
+
+            result['success'] = True
+            result['videos'] = [video]
+
+        except Exception as e:
+            result['error'] = str(e)
+            logger.error(f"Failed to fetch single video: {e}")
+
+        return result
+
+    def update_channel_metrics(self, channel_id: str):
+        """영상 리스트 DB 데이터를 집계하여 채널 리스트 DB의 통계 정보(수집영상 갯수, 평균 조회수 등)를 실시간 최신화"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            # 1. sheet_videos에서 해당 채널의 영상 수, 평균 조회수 집계
+            cursor.execute('''
+                SELECT COUNT(*), AVG(views)
+                FROM sheet_videos
+                WHERE channel_id = ? AND tab_name = '영상 리스트'
+            ''', (channel_id,))
+            row = cursor.fetchone()
+
+            if row:
+                video_count = row[0] or 0
+                avg_views = int(row[1]) if row[1] is not None else 0
+
+                # 2. 최근 30개 영상 평균 조회수 집계
+                cursor.execute('''
+                    SELECT AVG(views) FROM (
+                        SELECT views FROM sheet_videos 
+                        WHERE channel_id = ? AND tab_name = '영상 리스트' 
+                        ORDER BY upload_date DESC LIMIT 30
+                    )
+                ''', (channel_id,))
+                avg_views_30 = int(cursor.fetchone()[0] or 0)
+
+                # 3. 상위 3개 제외 평균 조회수 집계
+                cursor.execute('''
+                    SELECT AVG(views) FROM (
+                        SELECT views FROM sheet_videos 
+                        WHERE channel_id = ? AND tab_name = '영상 리스트' 
+                        ORDER BY views DESC LIMIT -1 OFFSET 3
+                    )
+                ''', (channel_id,))
+                avg_exclude_top3 = int(cursor.fetchone()[0] or 0)
+
+                # 4. sheet_channels 테이블 통계 갱신
+                cursor.execute('''
+                    UPDATE sheet_channels
+                    SET collected_video_count = ?,
+                        collected_video_avg_views = ?,
+                        avg_views_30 = ?,
+                        avg_views_exclude_top3 = ?
+                    WHERE channel_id = ?
+                ''', (video_count, avg_views, avg_views_30, avg_exclude_top3, channel_id))
+                
+                conn.commit()
+                logger.info(f"✓ Channel {channel_id} metrics updated. Count: {video_count}, Avg: {avg_views}, Avg30: {avg_views_30}, ExclTop3: {avg_exclude_top3}")
+        except Exception as e:
+            logger.error(f"Failed to update channel metrics for {channel_id}: {e}")
+        finally:
+            conn.close()
 
     def get_synced_channels(self) -> list:
         """동기화된 채널 목록 조회"""

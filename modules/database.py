@@ -41,6 +41,11 @@ class DatabaseHandler:
         """데이터베이스 테이블 초기화 (3개 테이블 분리 구조)"""
         cursor = self.conn.cursor()
 
+        # API 관련 기존 테이블 DROP 처리 (사용자 요청에 의한 DB 제거)
+        cursor.execute("DROP TABLE IF EXISTS api_sync_logs")
+        cursor.execute("DROP TABLE IF EXISTS api_videos")
+        cursor.execute("DROP TABLE IF EXISTS api_channels")
+
         # 1. 쇼츠 랭킹 테이블 (shorts_rank)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS shorts_rank (
@@ -141,43 +146,6 @@ class DatabaseHandler:
             )
         ''')
 
-        # 6. API 채널 데이터 테이블 (YouTube API 연동용) - Phase 1.1 확장
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS api_channels (
-                channel_id TEXT PRIMARY KEY,
-                title TEXT,
-                thumbnail_url TEXT,
-                subscriber_count INTEGER,
-                view_count INTEGER,
-                video_count INTEGER,
-                uploads_playlist_id TEXT,
-                crawled_url TEXT,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_synced_at DATETIME,
-                sync_status TEXT,
-                collected_video_count INTEGER DEFAULT 0,
-                latest_video_upload_date DATE
-            )
-        ''')
-
-        # 7. API 영상 데이터 테이블 (영상/쇼츠 구분)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS api_videos (
-                video_id TEXT PRIMARY KEY,
-                channel_id TEXT,
-                title TEXT,
-                published_at DATETIME,
-                duration_iso TEXT,
-                duration_sec INTEGER,
-                video_type TEXT,
-                view_count INTEGER,
-                like_count INTEGER,
-                tags TEXT,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(channel_id) REFERENCES api_channels(channel_id)
-            )
-        ''')
-
         # 8. Quota 로그 테이블 (API 사용량 추적)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS quota_logs (
@@ -186,20 +154,6 @@ class DatabaseHandler:
                 endpoint TEXT,
                 units_used INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        # 9. API 동기화 로그 테이블 (Phase 1.2 신설)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS api_sync_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel_id TEXT,
-                channel_name TEXT,
-                status TEXT,
-                videos_fetched INTEGER DEFAULT 0,
-                used_quota INTEGER DEFAULT 0,
-                error_message TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -260,22 +214,160 @@ class DatabaseHandler:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_videos_crawled_at ON videos(crawled_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_history_crawled_at ON crawl_history(crawled_at)')
 
-        # API 테이블 인덱스
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_channels_title ON api_channels(title)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_channels_sync_status ON api_channels(sync_status)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_channels_last_synced ON api_channels(last_synced_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_videos_channel_id ON api_videos(channel_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_videos_video_type ON api_videos(video_type)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_videos_published ON api_videos(published_at)')
+        # Quota 인덱스
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_quota_logs_date ON quota_logs(request_date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_sync_logs_channel ON api_sync_logs(channel_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_sync_logs_created ON api_sync_logs(created_at)')
 
         # monitored_playlists 인덱스
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_playlists_last_synced ON monitored_playlists(last_synced_at)')
 
+        # ==============================================================================
+        # [NEW] 구글 스프레드시트 연동을 위한 전용 테이블 및 인덱스 신설
+        # ==============================================================================
+        # 1. 영상 관련 통합 테이블 (영상 리스트, 레퍼런스, 검색결과, 조건추출, 재생목록 통합)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sheet_videos (
+                video_id TEXT,
+                tab_name TEXT,
+                upload_date TEXT,
+                crawl_date TEXT,
+                keyword TEXT,
+                video_link TEXT,
+                title TEXT,
+                views INTEGER DEFAULT 0,
+                is_benchmark_channel TEXT,
+                is_shorts TEXT,
+                duration TEXT,
+                channel_name TEXT,
+                category1 TEXT,
+                category2 TEXT,
+                subscribers INTEGER DEFAULT 0,
+                thumbnail_link TEXT,
+                hooking_subtitle TEXT,
+                has_hooking_subtitle TEXT,
+                transcript_content TEXT,
+                has_transcript TEXT,
+                transcript_char_count INTEGER DEFAULT 0,
+                analysis TEXT,
+                likes INTEGER DEFAULT 0,
+                comments INTEGER DEFAULT 0,
+                sub_to_view_ratio REAL,
+                view_to_like_ratio REAL,
+                view_to_comment_ratio REAL,
+                days_since_upload INTEGER,
+                daily_avg_views REAL,
+                views_over_1m TEXT,
+                views_over_5m TEXT,
+                views_over_10m TEXT,
+                views_multiplier REAL,
+                likes_over_3pct TEXT,
+                category_id TEXT,
+                category_name TEXT,
+                description TEXT,
+                description_char_count INTEGER DEFAULT 0,
+                has_hashtag TEXT,
+                used_hashtags TEXT,
+                graph TEXT,
+                video_count INTEGER DEFAULT 0,
+                channel_total_views INTEGER DEFAULT 0,
+                avg_views_per_video INTEGER DEFAULT 0,
+                channel_created_at TEXT,
+                days_since_channel_creation INTEGER,
+                is_narration TEXT,
+                is_scraped TEXT,
+                is_ai_generated TEXT,
+                is_reference TEXT,
+                has_subtitle_downloaded TEXT,
+                is_channel_monetized TEXT,
+                is_shopping_monetized TEXT,
+                channel_country TEXT,
+                used_language TEXT,
+                channel_id TEXT,
+                channel_link TEXT,
+                playlist_name TEXT,
+                transcript_file TEXT,
+                has_thumbnail TEXT,
+                thumbnail_image_url TEXT,
+                thumbnail_path TEXT,
+                original_row_order INTEGER,
+                channel_description TEXT,
+                channel_handle TEXT,
+                is_deleted_channel TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(video_id, tab_name)
+            )
+        ''')
+
+        # 2. 채널 관련 테이블 (채널 리스트용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sheet_channels (
+                channel_id TEXT PRIMARY KEY,
+                is_fetched TEXT,
+                crawl_date TEXT,
+                days_since_crawl INTEGER,
+                channel_link TEXT,
+                channel_name TEXT,
+                category1 TEXT,
+                category2 TEXT,
+                channel_feature TEXT,
+                is_benchmark_channel TEXT,
+                subscribers INTEGER DEFAULT 0,
+                median_views_30 INTEGER DEFAULT 0,
+                is_deleted_channel TEXT,
+                is_target_channel TEXT,
+                total_video_count INTEGER DEFAULT 0,
+                total_channel_views_conv TEXT,
+                total_channel_views INTEGER DEFAULT 0,
+                avg_views_per_video INTEGER DEFAULT 0,
+                collected_video_avg_views INTEGER DEFAULT 0,
+                avg_views_30 INTEGER DEFAULT 0,
+                collected_video_count INTEGER DEFAULT 0,
+                avg_video_length TEXT,
+                views_over_1m_ratio REAL,
+                views_over_5m_ratio REAL,
+                views_over_10m_ratio REAL,
+                sub_to_view_multiplier_30 REAL,
+                fairness_index_30 REAL,
+                subscribers_per_video INTEGER DEFAULT 0,
+                views_per_subscriber REAL,
+                views_over_1m_count INTEGER DEFAULT 0,
+                views_over_5m_count INTEGER DEFAULT 0,
+                views_over_10m_count INTEGER DEFAULT 0,
+                playlist_name TEXT,
+                channel_country TEXT,
+                used_language TEXT,
+                avg_views_exclude_top3 INTEGER DEFAULT 0,
+                median_avg_views INTEGER DEFAULT 0,
+                created_at TEXT,
+                days_since_creation INTEGER,
+                avg_upload_period REAL,
+                is_scraped TEXT,
+                is_ai_generated TEXT,
+                channel_description TEXT,
+                channel_handle TEXT,
+                original_row_order INTEGER,
+                created_at_db DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 3. 재생목록 ID 테이블 (재생목록ID용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sheet_playlist_ids (
+                playlist_id TEXT PRIMARY KEY,
+                playlist_name TEXT,
+                video_count INTEGER DEFAULT 0,
+                last_checked_at TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 신설 테이블 인덱스 정의
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sheet_videos_tab ON sheet_videos(tab_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sheet_videos_title ON sheet_videos(title)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sheet_videos_channel ON sheet_videos(channel_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sheet_channels_name ON sheet_channels(channel_name)')
+
         self.conn.commit()
-        logger.debug("Database tables and indexes created (extended structure with API tables)")
+        logger.debug("Database tables and indexes created (extended structure with API tables and sheet integration)")
 
     def _migrate_db(self):
         """기존 테이블에 누락된 컬럼 추가 (마이그레이션)"""
@@ -294,61 +386,14 @@ class DatabaseHandler:
             ('channels_rank', 'period', 'TEXT'),
             ('channels_rank', 'channel_url', 'TEXT'),  # 채널 URL (ID 추출용)
             ('channels_rank', 'ranking_type', 'TEXT'),  # 랭킹 타입 (인기순위/구독자급상승)
-
-            # Phase 1.1: api_channels 테이블 확장 컬럼
-            ('api_channels', 'last_synced_at', 'DATETIME'),
-            ('api_channels', 'sync_status', 'TEXT'),
-            ('api_channels', 'collected_video_count', 'INTEGER DEFAULT 0'),
-            ('api_channels', 'latest_video_upload_date', 'DATE'),
             
             # 크롤링 테이블 댓글 컬럼 추가
             ('shorts_rank', 'comments', 'INTEGER DEFAULT 0'),
             ('videos_rank', 'comments', 'INTEGER DEFAULT 0'),
 
-            # PLAN.md - api_videos 테이블 Deep Data 확장 (2025-12-10)
-            ('api_videos', 'video_link', 'TEXT'),  # https://youtu.be/...
-            ('api_videos', 'channel_name', 'TEXT'),  # 채널명 (Denormalization)
-            ('api_videos', 'category_id', 'TEXT'),  # 카테고리 ID
-            ('api_videos', 'category_name', 'TEXT'),  # 카테고리명
-            ('api_videos', 'thumbnail_url', 'TEXT'),  # 썸네일 고화질 링크
-            ('api_videos', 'thumbnail_path', 'TEXT'),  # 썸네일 로컬 저장 경로
-            ('api_videos', 'description', 'TEXT'),  # 영상 설명 (AI 분석용)
-            ('api_videos', 'comment_count', 'INTEGER'),  # 댓글 수
-
-            # 파생/계산 데이터 - AI 분석 기초
-            ('api_videos', 'collected_at', 'DATETIME'),  # 수집 시점
-            ('api_videos', 'days_since_upload', 'INTEGER'),  # 업로드 경과일
-            ('api_videos', 'view_sub_ratio', 'REAL'),  # 구독자 대비 조회수
-            ('api_videos', 'like_view_ratio', 'REAL'),  # 조회수 대비 좋아요
-            ('api_videos', 'comment_view_ratio', 'REAL'),  # 조회수 대비 댓글
-            ('api_videos', 'daily_avg_views', 'REAL'),  # 일평균 조회수
-
-            # AI 활용 예비 컬럼
-            ('api_videos', 'transcript_txt', 'TEXT'),  # 대본 텍스트
-            ('api_videos', 'is_ai_generated', 'BOOLEAN'),  # AI 생성 여부
-            ('api_videos', 'analysis_summary', 'TEXT'),  # AI 분석 요약
-
-            # PLAN.md - api_channels 테이블 Deep Data 확장 (2025-12-10)
-            ('api_channels', 'channel_handle', 'TEXT'),  # 채널 핸들 (@name)
-            ('api_channels', 'channel_link', 'TEXT'),  # 채널 URL
-            ('api_channels', 'country', 'TEXT'),  # 국가 코드
-            ('api_channels', 'description', 'TEXT'),  # 채널 설명
-            ('api_channels', 'published_at', 'DATETIME'),  # 개설일
-            ('api_channels', 'keywords', 'TEXT'),  # 채널 키워드
-
-            # 파생/계산 데이터
-            ('api_channels', 'days_since_published', 'INTEGER'),  # 개설 경과일
-            ('api_channels', 'avg_views_recent', 'REAL'),  # 최근 영상 평균 조회수
-            ('api_channels', 'video_upload_cycle', 'REAL'),  # 평균 업로드 주기 (일)
-            ('api_channels', 'performance_index', 'REAL'),  # 채널 활성도 지수
-            ('api_channels', 'last_deep_sync_at', 'DATETIME'),  # 마지막 정밀 수집일
-
-            # Playlist-Driven Channel Discovery (개선 #40)
-            ('api_channels', 'playlist_source', 'TEXT'),  # 채널을 추출한 재생목록 ID
-
-            # PLAN.md Section 3.2: Robust Playlist Extraction (2025-12-11)
-            ('api_channels', 'discovery_video_id', 'TEXT'),  # 채널 발견에 사용된 영상 ID
-            ('api_channels', 'discovery_video_url', 'TEXT'),  # 채널 발견에 사용된 영상 URL
+            # 구글 시트 연동 통합 DB 마이그레이션 - 채널삭제여부 추가
+            ('sheet_channels', 'is_deleted_channel', 'TEXT'),
+            ('sheet_videos', 'is_deleted_channel', 'TEXT'),
         ]
 
         for table, column, col_type in migrations:
@@ -1203,145 +1248,15 @@ class DatabaseHandler:
 
     def upsert_api_video_deep(self, video_data):
         """
-        Deep Data 영상 정보 UPSERT (PLAN.md 기준 확장 컬럼 포함)
-
-        Args:
-            video_data (dict): 영상 데이터 (확장 필드 포함)
+        Deep Data 영상 정보 UPSERT (API 테이블 제거로 인해 비활성화)
         """
-        cursor = self.conn.cursor()
-
-        cursor.execute('''
-            INSERT INTO api_videos (
-                video_id, channel_id, title, published_at, duration_iso, duration_sec,
-                video_type, view_count, like_count, tags,
-                video_link, channel_name, category_id, category_name,
-                thumbnail_url, thumbnail_path, description, comment_count,
-                collected_at, days_since_upload, view_sub_ratio, like_view_ratio,
-                comment_view_ratio, daily_avg_views, last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(video_id) DO UPDATE SET
-                channel_id = excluded.channel_id,
-                title = excluded.title,
-                published_at = excluded.published_at,
-                duration_iso = excluded.duration_iso,
-                duration_sec = excluded.duration_sec,
-                video_type = excluded.video_type,
-                view_count = excluded.view_count,
-                like_count = excluded.like_count,
-                tags = excluded.tags,
-                video_link = excluded.video_link,
-                channel_name = excluded.channel_name,
-                category_id = excluded.category_id,
-                category_name = excluded.category_name,
-                thumbnail_url = excluded.thumbnail_url,
-                thumbnail_path = excluded.thumbnail_path,
-                description = excluded.description,
-                comment_count = excluded.comment_count,
-                collected_at = excluded.collected_at,
-                days_since_upload = excluded.days_since_upload,
-                view_sub_ratio = excluded.view_sub_ratio,
-                like_view_ratio = excluded.like_view_ratio,
-                comment_view_ratio = excluded.comment_view_ratio,
-                daily_avg_views = excluded.daily_avg_views,
-                last_updated = CURRENT_TIMESTAMP
-        ''', (
-            video_data.get('video_id'),
-            video_data.get('channel_id'),
-            video_data.get('title'),
-            video_data.get('published_at'),
-            video_data.get('duration_iso'),
-            video_data.get('duration_sec'),
-            video_data.get('video_type'),
-            video_data.get('view_count'),
-            video_data.get('like_count'),
-            video_data.get('tags'),
-            video_data.get('video_link'),
-            video_data.get('channel_name'),
-            video_data.get('category_id'),
-            video_data.get('category_name'),
-            video_data.get('thumbnail_url'),
-            video_data.get('thumbnail_path'),
-            video_data.get('description'),
-            video_data.get('comment_count'),
-            video_data.get('collected_at'),
-            video_data.get('days_since_upload'),
-            video_data.get('view_sub_ratio'),
-            video_data.get('like_view_ratio'),
-            video_data.get('comment_view_ratio'),
-            video_data.get('daily_avg_views'),
-        ))
-
-        self.conn.commit()
+        pass
 
     def upsert_api_channel_deep(self, channel_data):
         """
-        Deep Data 채널 정보 UPSERT (PLAN.md 기준 확장 컬럼 포함)
-
-        Args:
-            channel_data (dict): 채널 데이터 (확장 필드 포함)
+        Deep Data 채널 정보 UPSERT (API 테이블 제거로 인해 비활성화)
         """
-        cursor = self.conn.cursor()
-
-        cursor.execute('''
-            INSERT INTO api_channels (
-                channel_id, title, thumbnail_url, subscriber_count, view_count,
-                video_count, uploads_playlist_id, crawled_url,
-                channel_handle, channel_link, country, description, published_at, keywords,
-                days_since_published, avg_views_recent, video_upload_cycle, performance_index,
-                last_updated, last_synced_at, sync_status, collected_video_count,
-                latest_video_upload_date, last_deep_sync_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)
-            ON CONFLICT(channel_id) DO UPDATE SET
-                title = excluded.title,
-                thumbnail_url = excluded.thumbnail_url,
-                subscriber_count = excluded.subscriber_count,
-                view_count = excluded.view_count,
-                video_count = excluded.video_count,
-                uploads_playlist_id = excluded.uploads_playlist_id,
-                crawled_url = excluded.crawled_url,
-                channel_handle = excluded.channel_handle,
-                channel_link = excluded.channel_link,
-                country = excluded.country,
-                description = excluded.description,
-                published_at = excluded.published_at,
-                keywords = excluded.keywords,
-                days_since_published = excluded.days_since_published,
-                avg_views_recent = excluded.avg_views_recent,
-                video_upload_cycle = excluded.video_upload_cycle,
-                performance_index = excluded.performance_index,
-                last_updated = CURRENT_TIMESTAMP,
-                last_synced_at = excluded.last_synced_at,
-                sync_status = excluded.sync_status,
-                collected_video_count = excluded.collected_video_count,
-                latest_video_upload_date = excluded.latest_video_upload_date,
-                last_deep_sync_at = excluded.last_deep_sync_at
-        ''', (
-            channel_data.get('channel_id'),
-            channel_data.get('title'),
-            channel_data.get('thumbnail_url'),
-            channel_data.get('subscriber_count'),
-            channel_data.get('view_count'),
-            channel_data.get('video_count'),
-            channel_data.get('uploads_playlist_id'),
-            channel_data.get('crawled_url'),
-            channel_data.get('channel_handle'),
-            channel_data.get('channel_link'),
-            channel_data.get('country'),
-            channel_data.get('description'),
-            channel_data.get('published_at'),
-            channel_data.get('keywords'),
-            channel_data.get('days_since_published'),
-            channel_data.get('avg_views_recent'),
-            channel_data.get('video_upload_cycle'),
-            channel_data.get('performance_index'),
-            channel_data.get('last_synced_at'),
-            channel_data.get('sync_status'),
-            channel_data.get('collected_video_count'),
-            channel_data.get('latest_video_upload_date'),
-            channel_data.get('last_deep_sync_at'),
-        ))
-
-        self.conn.commit()
+        pass
 
     def get_reference_video_id(self, channel_name: str) -> tuple:
         """
@@ -1481,48 +1396,9 @@ class DatabaseHandler:
 
     def update_channel_id(self, old_channel_id: str, new_channel_id: str) -> bool:
         """
-        채널 ID 업데이트 (Smart Recovery 후 임시 ID를 실제 ID로 교체)
-
-        Args:
-            old_channel_id: 기존 ID (temp_xxx 또는 N/A)
-            new_channel_id: 새로운 YouTube Channel ID (UCxxx...)
-
-        Returns:
-            bool: 업데이트 성공 여부
+        채널 ID 업데이트 (API 테이블 제거로 인해 비활성화)
         """
-        try:
-            cursor = self.conn.cursor()
-
-            # api_channels 테이블 업데이트
-            cursor.execute('''
-                UPDATE api_channels
-                SET channel_id = ?,
-                    last_updated = ?
-                WHERE channel_id = ?
-            ''', (new_channel_id, datetime.now().isoformat(), old_channel_id))
-
-            updated_rows = cursor.rowcount
-
-            # api_videos 테이블도 FK 업데이트 (있는 경우)
-            cursor.execute('''
-                UPDATE api_videos
-                SET channel_id = ?
-                WHERE channel_id = ?
-            ''', (new_channel_id, old_channel_id))
-
-            self.conn.commit()
-
-            if updated_rows > 0:
-                logger.info(f"Channel ID updated: {old_channel_id} -> {new_channel_id}")
-                return True
-            else:
-                logger.warning(f"No rows updated for channel ID: {old_channel_id}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to update channel ID: {e}")
-            self.conn.rollback()
-            return False
+        return False
 
     # ========== Playlist CRUD (Playlist-Driven Channel Discovery) ==========
 
@@ -1651,53 +1527,9 @@ class DatabaseHandler:
 
     def upsert_channel_from_playlist(self, channel_id: str, channel_title: str, playlist_id: str = None, discovery_video_id: str = None, discovery_video_url: str = None) -> str:
         """
-        재생목록에서 추출한 채널 정보를 api_channels에 저장 (source='playlist')
-
-        Args:
-            channel_id: 채널 ID
-            channel_title: 채널명
-            playlist_id: 재생목록 ID (선택)
-            discovery_video_id: 채널 발견에 사용된 영상 ID (선택)
-            discovery_video_url: 채널 발견에 사용된 영상 URL (선택)
-
-        Returns:
-            'new' | 'updated'
+        재생목록에서 추출한 채널 정보를 api_channels에 저장 (API 테이블 제거로 인해 비활성화)
         """
-        cursor = self.conn.cursor()
-
-        try:
-            cursor.execute('SELECT 1 FROM api_channels WHERE channel_id = ?', (channel_id,))
-            exists = cursor.fetchone() is not None
-
-            if exists:
-                # 기존 채널: title, playlist_source, discovery 정보 업데이트
-                cursor.execute('''
-                    UPDATE api_channels
-                    SET title = COALESCE(?, title),
-                        playlist_source = COALESCE(?, playlist_source),
-                        discovery_video_id = COALESCE(?, discovery_video_id),
-                        discovery_video_url = COALESCE(?, discovery_video_url),
-                        last_updated = CURRENT_TIMESTAMP
-                    WHERE channel_id = ?
-                ''', (channel_title, playlist_id, discovery_video_id, discovery_video_url, channel_id))
-                result = 'updated'
-            else:
-                # 신규 채널: crawled_url='playlist', playlist_source, discovery 정보 저장
-                cursor.execute('''
-                    INSERT INTO api_channels
-                    (channel_id, title, crawled_url, playlist_source, discovery_video_id, discovery_video_url, last_updated)
-                    VALUES (?, ?, 'playlist', ?, ?, ?, CURRENT_TIMESTAMP)
-                ''', (channel_id, channel_title, playlist_id, discovery_video_id, discovery_video_url))
-                result = 'new'
-
-            self.conn.commit()
-            logger.debug(f"Channel from playlist {result}: {channel_id} - {channel_title} (playlist: {playlist_id}, video: {discovery_video_id})")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to upsert channel from playlist: {e}")
-            self.conn.rollback()
-            raise
+        return 'updated'
 
     def close(self):
         """데이터베이스 연결 종료"""

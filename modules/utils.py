@@ -549,3 +549,481 @@ def play_notification_sound():
         except Exception:
             logger.debug(f"Failed to play notification sound: {e}")
 
+
+def normalize_header_name(header):
+    """
+    구글 시트 헤더명을 정규화:
+    - 선두 넘버링 제거 (예: '01. 영상 ID' -> '영상 ID', '10 - 채널링크' -> '채널링크')
+    - 모든 공백, 쉼표, 물음표, 괄호 등 특수문자 제거
+    - 소문자화
+    """
+    if not header:
+        return ""
+    header = str(header).strip()
+    # 1. 선두 넘버링 및 마침표/공백/하이픈 제거
+    header = re.sub(r'^\d+[\.\s\-]*', '', header)
+    # 2. 공백 및 특수문자 제거
+    header = re.sub(r'[\s,\?\(\)\*_\-\"\']', '', header)
+    # 3. 소문자화
+    header = header.lower()
+    return header
+
+
+def match_db_column_by_header(header, db_columns=None):
+    """
+    구글 시트 헤더명에 대응하는 DB 컬럼명을 동적으로 반환
+    """
+    normalized = normalize_header_name(header)
+    
+    # 미리 정의된 헤더 대 DB 컬럼명 매핑 딕셔너리
+    HEADER_TO_DB_COLUMN = {
+        # 재생목록 ID 탭
+        "재생목록id": "playlist_id",
+        "재생목록이름": "playlist_name",
+        "영상갯수": "video_count",
+        "마지막체크일": "last_checked_at",
+
+        # 채널 리스트 탭
+        "채널id": "channel_id",
+        "가져왔는지여부": "is_fetched",
+        "수집날짜": "crawl_date",
+        "수집날짜경과일": "days_since_crawl",
+        "채널링크": "channel_link",
+        "채널명": "channel_name",
+        "분야1": "category1",
+        "분야2": "category2",
+        "채널특징": "channel_feature",
+        "벤치마킹채널여부": "is_benchmark_channel",
+        "구독자수": "subscribers",
+        "최근30개영상중위조회수": "median_views_30",
+        "채널삭제여부": "is_deleted_channel",
+        "가져올채널": "is_target_channel",
+        "채널전체영상갯수": "total_video_count",
+        "채널전체조회수변환": "total_channel_views_conv",
+        "채널전체조회수": ["total_channel_views", "channel_total_views"],
+        "영상당평균조회수전투력": "avg_views_per_video",
+        "수집한영상평균조회수": "collected_video_avg_views",
+        "최근30개영상평균조회수": "avg_views_30",
+        "수집영상갯수": "collected_video_count",
+        "평균영상길이": "avg_video_length",
+        "조회수100만이상비율": "views_over_1m_ratio",
+        "조회수500만이상비율": "views_over_5m_ratio",
+        "조회수1000만이상비율": "views_over_10m_ratio",
+        "구독자대비조회수배율최근30개": "sub_to_view_multiplier_30",
+        "공정성과지수최근30개": "fairness_index_30",
+        "영상당구독자수": "subscribers_per_video",
+        "구독자1명당조회수": "views_per_subscriber",
+        "조회수100만이상갯수": "views_over_1m_count",
+        "조회수500만이상갯수": "views_over_5m_count",
+        "조회수1000만이상갯수": "views_over_10m_count",
+        "조회수상위3개제외평균조회수": "avg_views_exclude_top3",
+        "중위평균조회수": "median_avg_views",
+        "개설일": "created_at",
+        "개설이후수집날짜까지기간": "days_since_creation",
+        "영상1개당평균업로드주기": "avg_upload_period",
+        "퍼온영상인가": "is_scraped",
+        "ai생성영상인가": "is_ai_generated",
+        "채널디스크립션": "channel_description",
+        "채널핸들": "channel_handle",
+        "원본행순서": "original_row_order",
+        "순번": "original_row_order",
+
+        # 영상 관련 통합 탭들
+        "영상id": "video_id",
+        "영상업로드날짜": "upload_date",
+        "업로드날짜": "upload_date",
+        "검색키워드": "keyword",
+        "영상링크": "video_link",
+        "제목": "title",
+        "조회수": "views",
+        "쇼츠여부": "is_shorts",
+        "영상길이": "duration",
+        "썸네일링크": "thumbnail_link",
+        "후킹자막": "hooking_subtitle",
+        "후킹자막유무": "has_hooking_subtitle",
+        "대본내용": "transcript_content",
+        "대본유무": "has_transcript",
+        "대본텍스트수": "transcript_char_count",
+        "대본글자수": "transcript_char_count",
+        "분석": "analysis",
+        "영상분석내용": "analysis",
+        "좋아요수": "likes",
+        "좋아요": "likes",
+        "댓글수": "comments",
+        "댓글": "comments",
+        "구독자대비조회수배율": "sub_to_view_ratio",
+        "구독자대비조회수비율": "sub_to_view_ratio",
+        "조회수대비좋아요": "view_to_like_ratio",
+        "조회수대비좋아요비율": "view_to_like_ratio",
+        "조회수대비댓글": "view_to_comment_ratio",
+        "조회수대비댓글비율": "view_to_comment_ratio",
+        "영상업로드이후수집날짜까지기간": "days_since_upload",
+        "업로드경과일": "days_since_upload",
+        "일평균조회수": "daily_avg_views",
+        "조회수100만이상": "views_over_1m",
+        "100만이상": "views_over_1m",
+        "조회수500만이상": "views_over_5m",
+        "500만이상": "views_over_5m",
+        "조회수1000만이상": "views_over_10m",
+        "1000만이상": "views_over_10m",
+        "구독자대비조회수몇배이상": "views_multiplier",
+        "조회수배수": "views_multiplier",
+        "좋아요3%이상": "likes_over_3pct",
+        "카테고리id": "category_id",
+        "카테고리분류": "category_name",
+        "카테고리명": "category_name",
+        "디스크립션": "description",
+        "영상설명": "description",
+        "디스크립션텍스트수": "description_char_count",
+        "설명글자수": "description_char_count",
+        "해시태그유무": "has_hashtag",
+        "사용해시태그": "used_hashtags",
+        "그래프": "graph",
+        "영상당평균조회수": "avg_views_per_video",
+        "채널개설일": "channel_created_at",
+        "채널개설이후수집일까지경과일": "days_since_channel_creation",
+        "채널개설경과일": "days_since_channel_creation",
+        "음성나레이션여부": "is_narration",
+        "성우여부": "is_narration",
+        "레퍼런스사용할영상인가": "is_reference",
+        "레퍼런스여부": "is_reference",
+        "자막다운여부": "has_subtitle_downloaded",
+        "자막다운로드완료여부": "has_subtitle_downloaded",
+        "채널수익화여부": "is_channel_monetized",
+        "수익창출여부": "is_channel_monetized",
+        "쇼핑수익화여부": "is_shopping_monetized",
+        "쇼핑수익창출여부": "is_shopping_monetized",
+        "대본파일": "transcript_file",
+        "대본파일명": "transcript_file",
+        "썸네일여부": "has_thumbnail",
+        "썸네일유무": "has_thumbnail",
+        "썸네일이미지주소": "thumbnail_image_url",
+        "썸네일이미지url": "thumbnail_image_url",
+        "썸네일경로": "thumbnail_path",
+        "썸네일저장경로": "thumbnail_path",
+    }
+    
+    # 매핑 사전에서 찾기
+    col_name = HEADER_TO_DB_COLUMN.get(normalized)
+    
+    # 만약 매핑값이 리스트나 튜플이면 db_columns 중 실재하는 컬럼을 동적으로 매치
+    if isinstance(col_name, (list, tuple)):
+        if db_columns:
+            for cand in col_name:
+                if cand in db_columns:
+                    return cand
+            return col_name[0]
+        else:
+            return col_name[0]
+            
+    # 만약 사전에 없는데 db_columns가 주어졌다면 db_columns 내의 이름과 직접 공백 제거 비교도 해봄 (폴백)
+    if not col_name and db_columns:
+        for db_col in db_columns:
+            db_col_normalized = db_col.lower().replace('_', '')
+            if normalized == db_col_normalized:
+                return db_col
+                
+    return col_name
+
+
+def parse_date_string(date_str):
+    """
+    다양한 포맷의 날짜 문자열을 datetime.date 객체로 파싱
+    """
+    if not date_str or str(date_str).strip() in ['N/A', '', 'None']:
+        return None
+    date_str = str(date_str).strip()
+    
+    # 정규식으로 YYYY-MM-DD 또는 YYYY.MM.DD 또는 YYYY년 MM월 DD일 등에서 숫자 3개 추출
+    match = re.search(r'(\d{4})[\-\.\/\s년]+(\d{1,2})[\-\.\/\s월]+(\d{1,2})', date_str)
+    if match:
+        try:
+            year = int(match.group(1))
+            month = int(match.group(2))
+            day = int(match.group(3))
+            return datetime(year, month, day).date()
+        except ValueError:
+            pass
+            
+    # ISO 포맷 등 fallback
+    for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d', '%Y-%m-%d %H:%M:%S', '%Y.%m.%d %H:%M:%S'):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+            
+    return None
+
+
+def calculate_sheet_video_metrics(data):
+    """
+    유튜브 API 등으로 수집된 영상 데이터 딕셔너리를 받아
+    9행 수식 조건에 맞는 파생 데이터 필드들을 자동으로 계산하여 주입
+    """
+    # 1. 수집 날짜 (없으면 오늘)
+    crawl_date_str = data.get('crawl_date')
+    crawl_date = parse_date_string(crawl_date_str) if crawl_date_str else datetime.now().date()
+    if not crawl_date_str:
+        data['crawl_date'] = crawl_date.strftime('%Y-%m-%d')
+        
+    # 2. 업로드 날짜 파싱
+    upload_date_str = data.get('upload_date')
+    upload_date = parse_date_string(upload_date_str) if upload_date_str else None
+    
+    # 3. 경과일 계산 (days_since_upload)
+    days_since = None
+    if upload_date:
+        days_since = (crawl_date - upload_date).days
+        data['days_since_upload'] = max(0, days_since)
+    else:
+        data['days_since_upload'] = 0
+        
+    # 4. 일평균 조회수 (daily_avg_views)
+    views = parse_count_string(data.get('views', 0))
+    data['views'] = views
+    if days_since is not None:
+        data['daily_avg_views'] = round(views / max(1, days_since), 2)
+    else:
+        data['daily_avg_views'] = 0.0
+        
+    # 5. 조회수 구간 (100만, 500만, 1000만 이상)
+    data['views_over_1m'] = "ㅇ" if views >= 1_000_000 else "x"
+    data['views_over_5m'] = "ㅇ" if views >= 5_000_000 else "x"
+    data['views_over_10m'] = "ㅇ" if views >= 10_000_000 else "x"
+    
+    # 6. 구독자 수 파싱
+    subs = parse_count_string(data.get('subscribers', 0))
+    data['subscribers'] = subs
+    
+    # 7. 구독자 대비 조회수 비율/배율
+    if subs > 0:
+        data['sub_to_view_ratio'] = round(views / subs, 4)
+        data['views_multiplier'] = round(views / subs, 2)
+    else:
+        data['sub_to_view_ratio'] = 0.0
+        data['views_multiplier'] = 0.0
+        
+    # 8. 좋아요 수 파싱
+    likes = parse_count_string(data.get('likes', 0))
+    data['likes'] = likes
+    
+    # 9. 댓글 수 파싱
+    comments = parse_count_string(data.get('comments', 0))
+    data['comments'] = comments
+    
+    # 10. 조회수 대비 좋아요 비율
+    if views > 0:
+        data['view_to_like_ratio'] = round(likes / views, 4)
+        data['view_to_comment_ratio'] = round(comments / views, 4)
+        data['likes_over_3pct'] = "ㅇ" if (likes / views) >= 0.03 else "x"
+    else:
+        data['view_to_like_ratio'] = 0.0
+        data['view_to_comment_ratio'] = 0.0
+        data['likes_over_3pct'] = "x"
+        
+    # 11. 대본 관련
+    transcript = data.get('transcript_content', '')
+    if transcript:
+        data['has_transcript'] = "ㅇ"
+        data['transcript_char_count'] = len(str(transcript))
+    else:
+        data['has_transcript'] = "x"
+        data['transcript_char_count'] = 0
+        
+    # 12. 후킹자막 관련
+    hooking = data.get('hooking_subtitle', '')
+    data['has_hooking_subtitle'] = "ㅇ" if hooking else "x"
+    
+    # 13. 디스크립션 관련
+    desc = data.get('description', '')
+    if desc:
+        data['description_char_count'] = len(str(desc))
+        data['has_hashtag'] = "ㅇ" if '#' in str(desc) else "x"
+    else:
+        data['description_char_count'] = 0
+        data['has_hashtag'] = "x"
+        
+    # 14. 썸네일 관련
+    thumb_url = data.get('thumbnail_image_url') or data.get('thumbnail_link')
+    data['has_thumbnail'] = "ㅇ" if thumb_url else "x"
+    
+    # 15. 채널 전체 영상 정보 계산
+    v_count = parse_count_string(data.get('video_count', 0))
+    data['video_count'] = v_count
+    ch_views = parse_count_string(data.get('channel_total_views', 0))
+    data['channel_total_views'] = ch_views
+    if v_count > 0:
+        data['avg_views_per_video'] = int(ch_views / v_count)
+    else:
+        data['avg_views_per_video'] = 0
+        
+    # 16. 채널 개설 경과일
+    ch_created_str = data.get('channel_created_at')
+    ch_created = parse_date_string(ch_created_str) if ch_created_str else None
+    if ch_created:
+        data['days_since_channel_creation'] = max(0, (crawl_date - ch_created).days)
+    else:
+        data['days_since_channel_creation'] = 0
+        
+    # 17. 채널삭제 여부
+    data['is_deleted_channel'] = data.get('is_deleted_channel', 'x')
+        
+    return data
+
+
+def calculate_sheet_channel_metrics(data):
+    """
+    채널 리스트 탭의 파생 데이터 필드들을 자동으로 계산하여 주입
+    """
+    # 1. 수집 날짜
+    crawl_date_str = data.get('crawl_date')
+    crawl_date = parse_date_string(crawl_date_str) if crawl_date_str else datetime.now().date()
+    if not crawl_date_str:
+        data['crawl_date'] = crawl_date.strftime('%Y-%m-%d')
+        
+    # 2. 개설일 파싱 및 개설 경과일 계산 (days_since_creation)
+    created_at_str = data.get('created_at')
+    created_at = parse_date_string(created_at_str) if created_at_str else None
+    if created_at:
+        data['days_since_creation'] = max(0, (crawl_date - created_at).days)
+    else:
+        data['days_since_creation'] = 0
+        
+    # 3. 수집일 경과 계산 (days_since_crawl)
+    data['days_since_crawl'] = 0
+    
+    # 4. 구독자수, 영상갯수, 채널조회수 정수화
+    subs = parse_count_string(data.get('subscribers', 0))
+    data['subscribers'] = subs
+    
+    total_videos = parse_count_string(data.get('total_video_count', 0))
+    data['total_video_count'] = total_videos
+    
+    total_views = parse_count_string(data.get('total_channel_views', 0))
+    data['total_channel_views'] = total_views
+    
+    # 5. 영상당 평균 조회수 (avg_views_per_video)
+    if total_videos > 0:
+        data['avg_views_per_video'] = int(total_views / total_videos)
+        data['subscribers_per_video'] = int(subs / total_videos)
+    else:
+        data['avg_views_per_video'] = 0
+        data['subscribers_per_video'] = 0
+        
+    # 6. 구독자 1명당 조회수 (views_per_subscriber)
+    if subs > 0:
+        data['views_per_subscriber'] = round(total_views / subs, 2)
+    else:
+        data['views_per_subscriber'] = 0.0
+        
+    # 7. 채널삭제 여부
+    data['is_deleted_channel'] = data.get('is_deleted_channel', 'x')
+        
+    return data
+
+
+# DB 컬럼명 -> 구글 시트 상의 한글 컬럼명 매핑 사전
+DB_COLUMN_TO_DISPLAY_NAME = {
+    "video_id": "영상 ID",
+    "tab_name": "탭 이름",
+    "upload_date": "업로드 날짜",
+    "crawl_date": "수집 날짜",
+    "keyword": "검색 키워드",
+    "video_link": "영상 링크",
+    "title": "제목",
+    "views": "조회수",
+    "is_benchmark_channel": "벤치마킹 채널여부",
+    "is_shorts": "쇼츠 여부",
+    "duration": "영상 길이",
+    "channel_name": "채널명",
+    "category1": "분야1",
+    "category2": "분야2",
+    "subscribers": "구독자수",
+    "thumbnail_link": "썸네일 링크",
+    "hooking_subtitle": "후킹 자막",
+    "has_hooking_subtitle": "후킹 자막 유무",
+    "transcript_content": "대본 내용",
+    "has_transcript": "대본 유무",
+    "transcript_char_count": "대본 글자수",
+    "analysis": "영상 분석 내용",
+    "likes": "좋아요수",
+    "comments": "댓글수",
+    "sub_to_view_ratio": "구독자 대비 조회수 비율",
+    "view_to_like_ratio": "조회수 대비 좋아요 비율",
+    "view_to_comment_ratio": "조회수 대비 댓글 비율",
+    "days_since_upload": "업로드 경과일",
+    "daily_avg_views": "일평균 조회수",
+    "views_over_1m": "조회수 100만 이상",
+    "views_over_5m": "조회수 500만 이상",
+    "views_over_10m": "조회수 1000만 이상",
+    "views_multiplier": "조회수 배수",
+    "likes_over_3pct": "좋아요 3% 이상",
+    "category_id": "카테고리 ID",
+    "category_name": "카테고리명",
+    "description": "설명",
+    "description_char_count": "설명 글자수",
+    "has_hashtag": "해시태그 유무",
+    "used_hashtags": "사용 해시태그",
+    "graph": "그래프",
+    "video_count": "영상개수",
+    "channel_total_views": "채널전체조회수",
+    "avg_views_per_video": "영상당 평균 조회수",
+    "channel_created_at": "채널 개설일",
+    "days_since_channel_creation": "채널 개설 경과일",
+    "is_narration": "음성 나레이션 여부",
+    "is_scraped": "퍼온 영상인가",
+    "is_ai_generated": "AI 생성 영상인가",
+    "is_reference": "레퍼런스 여부",
+    "has_subtitle_downloaded": "자막 다운로드 여부",
+    "is_channel_monetized": "채널 수익화 여부",
+    "is_shopping_monetized": "쇼핑 수익화 여부",
+    "channel_country": "채널 국가",
+    "used_language": "사용 언어",
+    "channel_id": "채널 ID",
+    "channel_link": "채널 링크",
+    "playlist_name": "재생목록 이름",
+    "transcript_file": "대본 파일명",
+    "has_thumbnail": "썸네일 유무",
+    "thumbnail_image_url": "썸네일 이미지 URL",
+    "thumbnail_path": "썸네일 저장 경로",
+    "original_row_order": "순번",
+    "channel_description": "채널 설명",
+    "channel_handle": "채널 핸들",
+    "is_deleted_channel": "채널삭제 여부",
+    
+    # sheet_channels 전용
+    "is_fetched": "가져왔는지 여부",
+    "days_since_crawl": "수집날짜 경과일",
+    "channel_feature": "채널 특징",
+    "median_views_30": "최근 30개 영상 중위 조회수",
+    "is_target_channel": "가져올 채널",
+    "total_video_count": "채널전체 영상갯수",
+    "total_channel_views_conv": "채널전체 조회수 변환",
+    "total_channel_views": "채널전체조회수",
+    "collected_video_avg_views": "수집한 영상 평균 조회수",
+    "avg_views_30": "최근 30개 영상 평균 조회수",
+    "collected_video_count": "수집 영상갯수",
+    "avg_video_length": "평균 영상 길이",
+    "views_over_1m_ratio": "조회수 100만 이상 비율",
+    "views_over_5m_ratio": "조회수 500만 이상 비율",
+    "views_over_10m_ratio": "조회수 1000만 이상 비율",
+    "sub_to_view_multiplier_30": "구독자 대비 조회수 배율 최근 30개",
+    "fairness_index_30": "공정성 지수 최근 30개",
+    "subscribers_per_video": "영상당 구독자수",
+    "views_per_subscriber": "구독자 1명당 조회수",
+    "views_over_1m_count": "조회수 100만 이상 갯수",
+    "views_over_5m_count": "조회수 500만 이상 갯수",
+    "views_over_10m_count": "조회수 1000만 이상 갯수",
+    "avg_views_exclude_top3": "조회수 상위 3개 제외 평균 조회수",
+    "median_avg_views": "중위 평균 조회수",
+    "created_at": "개설일",
+    "days_since_creation": "개설이후 수집날짜까지 기간",
+    "avg_upload_period": "영상 1개당 평균 업로드 주기",
+    
+    # sheet_playlist_ids 전용
+    "playlist_id": "재생목록 ID",
+    "last_checked_at": "마지막 체크일"
+}
+
+
+

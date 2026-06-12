@@ -32,6 +32,8 @@ instance/
 # Google Cloud credentials
 google_service_key/*.json
 token.pickle
+**/google_service_key/*.json
+**/token*.pickle
 
 # Output files
 output/*.csv
