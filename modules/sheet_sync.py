@@ -32,6 +32,17 @@ TAB_MAPPING = {
 }
 
 
+# 구글 시트에 업데이트할 때 값이 0이거나 비어있을 경우 빈 칸으로 처리할 숫자형 컬럼 목록
+NUMERIC_COLUMNS = {
+    'subscribers', 'total_video_count', 'total_channel_views', 
+    'views', 'likes', 'comments', 
+    'median_views_30', 'avg_views_30', 'collected_video_avg_views', 
+    'collected_video_count', 'avg_views_exclude_top3', 'median_avg_views',
+    'avg_views_per_video', 'subscribers_per_video', 'views_per_subscriber',
+    'video_count', 'days_since_creation', 'days_since_crawl'
+}
+
+
 def is_new_date_newer(old_date_str, new_date_str):
     """
     old_date_str과 new_date_str을 비교하여 new_date_str이 더 최신(크면) True를 반환.
@@ -449,6 +460,13 @@ def sync_db_to_sheet(sheet_url, tab_name, creds_path=None):
                 val = row_dict.get(col_name, "")
                 if val is None:
                     val = ""
+                # 숫자형 컬럼인데 값이 0이거나 빈 값인 경우 빈 문자열로 처리하여 시트 상에 빈 상태 유지
+                if col_name in NUMERIC_COLUMNS:
+                    try:
+                        if val == "" or float(val) == 0.0:
+                            val = ""
+                    except (ValueError, TypeError):
+                        pass
                 val = format_datetime_for_sheet(val)
                 sheet_row.append(str(val))
             else:
