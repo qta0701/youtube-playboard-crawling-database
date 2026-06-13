@@ -57,17 +57,25 @@ call venv\Scripts\activate.bat
 
 :: Check if requirements are installed (including undetected_chromedriver, selenium_stealth, streamlit, plotly)
 python -c "import undetected_chromedriver, selenium_stealth, streamlit, plotly" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Installing required packages...
-    python -m pip install --upgrade pip >nul 2>&1
-    pip install -r requirements.txt
-    if %errorlevel% neq 0 (
-        echo ERROR: Failed to install packages
-        pause
-        exit /b 1
-    )
-    echo Packages installed successfully
-)
+if %errorlevel% equ 0 goto start_app
+
+echo Installing required packages...
+python -m pip install --upgrade pip >nul 2>&1
+pip install -r requirements.txt
+if %errorlevel% equ 0 goto install_success
+
+:: pip가 캐시 에러 등으로 non-zero를 리턴했어도, 실제 패키지가 정상 임포트되는지 더블 체크하여 예외를 보완합니다.
+python -c "import undetected_chromedriver, selenium_stealth, streamlit, plotly" >nul 2>&1
+if %errorlevel% equ 0 goto install_success
+
+echo ERROR: Failed to install packages
+pause
+exit /b 1
+
+:install_success
+echo Packages installed successfully
+
+:start_app
 
 :: Create necessary directories
 if not exist output mkdir output

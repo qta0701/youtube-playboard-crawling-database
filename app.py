@@ -3018,9 +3018,48 @@ def run_collection_work(
     video_range,
     recent_limit,
     since_year,
-    bulk_channels_list=None
+    bulk_channels_list=None,
+    selected_playlist_ids=None,
+    sheet_urls=None
 ):
     try:
+        # 헬퍼 함수: 백그라운드 구글 스프레드시트 동기화
+        def auto_sync_to_google_sheet(mode, sync_videos, sync_channel, sheet_urls, log_history_list):
+            if not sheet_urls:
+                return
+            
+            from modules.sheet_sync import sync_db_to_sheet
+            # 각 모드별 동기화할 탭 선별
+            tabs_to_sync = []
+            if mode == 'channel':
+                tabs_to_sync.append("채널 리스트")
+                if sync_videos:
+                    tabs_to_sync.append("영상 리스트")
+            elif mode == 'video':
+                tabs_to_sync.append("영상 리스트")
+                if sync_channel:
+                    tabs_to_sync.append("채널 리스트")
+            elif mode == 'bulk_channel':
+                tabs_to_sync.append("채널 리스트")
+                if sync_videos:
+                    tabs_to_sync.append("영상 리스트")
+            elif mode == 'playlist':
+                tabs_to_sync.append("재생목록ID")
+                tabs_to_sync.append("유튜브 재생목록")
+                tabs_to_sync.append("채널 리스트")
+                
+            for tab in tabs_to_sync:
+                url = sheet_urls.get(tab)
+                if not url:
+                    log_history_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ '{tab}' 탭 구글시트 URL이 설정되지 않아 동기화를 건너뜁니다.")
+                    continue
+                try:
+                    log_history_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] 구글 시트 '{tab}' 동기화 시작...")
+                    exported_rows = sync_db_to_sheet(url, tab_name=tab)
+                    log_history_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ 구글 시트 '{tab}' 동기화 완료 ({exported_rows}개 행)")
+                except Exception as e:
+                    log_history_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ '{tab}' 탭 구글시트 동기화 실패: {e}")
+
         state.is_running = True
         state.status = "수집 준비 중..."
         state.progress = 0.0
@@ -3119,10 +3158,25 @@ def run_collection_work(
                 youtube_manager.update_channel_metrics(target_channel_id)
                 state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ 채널 통계 실시간 최신화 완료 (sheet_channels)")
             
+            state.progress = 0.9
+            state.status = "구글 시트 동기화 중..."
+            auto_sync_to_google_sheet(mode, sync_videos, False, sheet_urls, state.log_history)
+            
+            summary_row = {
+                "채널 ID": target_channel_id,
+                "채널명": ch_title,
+                "구독자수": res.get('subs', 'N/A') if res else 'N/A',
+                "총 영상수": res.get('videos', 'N/A') if res else 'N/A',
+                "수집 비디오": f"일반 {v_res.get('video_count', 0)}개 / 쇼츠 {v_res.get('shorts_count', 0)}개" if sync_videos and 'v_res' in locals() else "미수집",
+                "수집 시간": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            summary_df = pd.DataFrame([summary_row])
+            
             state.progress = 1.0
             state.result = {
                 "status": "success",
-                "msg": f"✓ '{ch_title}' 채널 및 데이터 수집이 성공적으로 완료되었습니다!"
+                "msg": f"✓ '{ch_title}' 채널 및 데이터 수집이 성공적으로 완료되었습니다!",
+                "summary_df": summary_df
             }
             
         elif mode == 'video':
@@ -3155,10 +3209,25 @@ def run_collection_work(
                     youtube_manager.update_channel_metrics(v_channel_id)
                     state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ 해당 채널({v_channel_id}) 통계 실시간 최신화 완료 (sheet_channels)")
                 
+                state.progress = 0.9
+                state.status = "구글 시트 동기화 중..."
+                auto_sync_to_google_sheet(mode, False, sync_channel, sheet_urls, state.log_history)
+                
+                summary_row = {
+                    "영상 ID": video_id,
+                    "영상 제목": v_title,
+                    "채널 ID": v_channel_id or 'N/A',
+                    "조회수": f"{v_item.get('views', 0):,}" if v_item and v_item.get('views') is not None else 'N/A',
+                    "좋아요수": f"{v_item.get('likes', 0):,}" if v_item and v_item.get('likes') is not None else 'N/A',
+                    "수집 시간": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                summary_df = pd.DataFrame([summary_row])
+                
                 state.progress = 1.0
                 state.result = {
                     "status": "success",
-                    "msg": f"✓ 영상 '{v_title}' 수집 및 DB 저장이 완료되었습니다!"
+                    "msg": f"✓ 영상 '{v_title}' 수집 및 DB 저장이 완료되었습니다!",
+                    "summary_df": summary_df
                 }
                 
             # 2. 범위형 수집 (최근/전체/연도별)
@@ -3244,38 +3313,66 @@ def run_collection_work(
                         youtube_manager.update_channel_metrics(cid)
                         state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ 채널({cid}) 통계 실시간 최신화 완료 (sheet_channels)")
                 
+                state.progress = 0.9
+                state.status = "구글 시트 동기화 중..."
+                auto_sync_to_google_sheet(mode, True, sync_channel, sheet_urls, state.log_history)
+                
+                summary_rows = []
+                for v in v_res.get('videos', []):
+                    summary_rows.append({
+                        "영상 ID": v.get('video_id'),
+                        "영상 제목": v.get('title'),
+                        "채널명": v.get('channel_name'),
+                        "조회수": f"{v.get('views', 0):,}" if v.get('views') is not None else '0',
+                        "게시일": v.get('upload_date', 'N/A'),
+                        "형태": "쇼츠" if v.get('is_shorts') == 'True' else "롱폼"
+                    })
+                summary_df = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
+                
                 state.progress = 1.0
                 state.result = {
                     "status": "success",
-                    "msg": f"✓ 총 {len(v_res.get('videos', []))}개 영상 수집 및 DB 저장이 완료되었습니다!"
+                    "msg": f"✓ 총 {len(v_res.get('videos', []))}개 영상 수집 및 DB 저장이 완료되었습니다!",
+                    "summary_df": summary_df
                 }
 
         elif mode == 'playlist':
             state.status = "재생목록 분석 및 DB 로딩 중..."
             state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 재생목록 ID 연동 채널 수집을 시작합니다.")
             
-            # DB에서 재생목록 가져오기
-            conn = sqlite3.connect(youtube_manager.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT playlist_id FROM sheet_playlist_ids")
-            playlist_rows = cursor.fetchall()
-            conn.close()
-            
             p_ids = []
-            for r in playlist_rows:
-                val = r[0]
-                if not val:
-                    continue
-                pl_id = extract_playlist_id(val)
-                if pl_id:
-                    p_ids.append(pl_id)
-                else:
-                    p_ids.append(val.strip())
+            if selected_playlist_ids:
+                # 선택된 재생목록 ID들 사용
+                for val in selected_playlist_ids:
+                    if not val:
+                        continue
+                    pl_id = extract_playlist_id(val)
+                    if pl_id:
+                        p_ids.append(pl_id)
+                    else:
+                        p_ids.append(val.strip())
+                state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 선택된 재생목록 {len(p_ids)}개에 대해 수집을 진행합니다.")
+            else:
+                # DB에서 재생목록 가져오기 (전체 수집)
+                conn = sqlite3.connect(youtube_manager.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT playlist_id FROM sheet_playlist_ids")
+                playlist_rows = cursor.fetchall()
+                conn.close()
+                
+                for r in playlist_rows:
+                    val = r[0]
+                    if not val:
+                        continue
+                    pl_id = extract_playlist_id(val)
+                    if pl_id:
+                        p_ids.append(pl_id)
+                    else:
+                        p_ids.append(val.strip())
+                state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 전체 재생목록 {len(p_ids)}개 확인 완료.")
             
             if not p_ids:
-                raise Exception("로컬 DB 'sheet_playlist_ids' 테이블에 재생목록 ID가 존재하지 않습니다. 먼저 새로고침을 해주세요.")
-                
-            state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 동기화된 재생목록 {len(p_ids)}개 확인 완료.")
+                raise Exception("수집할 재생목록 ID가 존재하지 않습니다. 먼저 새로고침을 하거나 대상을 선택해 주세요.")
             
             # 기존 sheet_channels 채널 ID 캐싱
             conn = sqlite3.connect(youtube_manager.db_path)
@@ -3304,6 +3401,21 @@ def run_collection_work(
                     collected_videos_count += len(videos)
                     state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ {pid}에서 {len(videos)}개 영상 수집 완료.")
                     
+                    # DB의 sheet_playlist_ids 테이블에 영상 갯수와 마지막 체크일 업데이트
+                    now_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    try:
+                        conn = sqlite3.connect(youtube_manager.db_path)
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE sheet_playlist_ids 
+                            SET video_count = ?, last_checked_at = ? 
+                            WHERE playlist_id = ?
+                        """, (len(videos), now_time_str, pid))
+                        conn.commit()
+                        conn.close()
+                    except Exception as db_err:
+                        logger.error(f"Failed to update video_count for playlist {pid}: {db_err}")
+                    
                     # 소속 채널 추출 및 신규 채널 식별
                     for v in videos:
                         cid = v.get('channel_id')
@@ -3326,7 +3438,8 @@ def run_collection_work(
                     c_res = youtube_manager.sync_channel(
                         channel_url=f"https://www.youtube.com/channel/{cid}",
                         channel_name=ctitle,
-                        use_search_fallback=True
+                        use_search_fallback=True,
+                        is_fetched=''
                     )
                     if c_res['success']:
                         state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ 신규 채널 등록 성공: {ctitle} ({cid})")
@@ -3338,9 +3451,31 @@ def run_collection_work(
                 state.log_history.append(f"[{datetime.now().strftime('%H:%M:%S')}] 재생목록 비디오 소속 채널 중 신규 채널이 발견되지 않았습니다. (전원 기존 DB 존재)")
                 state.progress = 1.0
                 
+            state.progress = 0.9
+            state.status = "구글 시트 동기화 중..."
+            auto_sync_to_google_sheet(mode, False, False, sheet_urls, state.log_history)
+            
+            summary_rows = []
+            summary_rows.append({
+                "수집 구분": "재생목록 ID 연동 수집 완료",
+                "총 대상 재생목록 수": f"{len(p_ids)}개",
+                "총 수집 영상 수": f"{collected_videos_count}개",
+                "신규 채널 발견 및 등록 수": f"{len(new_channels_added)}개"
+            })
+            for cid, ctitle in new_channels_added.items():
+                summary_rows.append({
+                    "수집 구분": "└─ 신규 등록 채널",
+                    "총 대상 재생목록 수": ctitle,
+                    "총 수집 영상 수": cid,
+                    "신규 채널 발견 및 등록 수": "-"
+                })
+            summary_df = pd.DataFrame(summary_rows)
+            
+            state.progress = 1.0
             state.result = {
                 "status": "success",
-                "msg": f"✓ 재생목록 기반 수집 완료! 수집 영상: {collected_videos_count}개, 신규 채널 등록: {len(new_channels_added)}개"
+                "msg": f"✓ 재생목록 기반 수집 완료! 수집 영상: {collected_videos_count}개, 신규 채널 등록: {len(new_channels_added)}개",
+                "summary_df": summary_df
             }
 
         elif mode == 'bulk_channel':
@@ -3433,9 +3568,24 @@ def run_collection_work(
                     
                 state.progress = idx / total_bulk
                 
+            state.progress = 0.9
+            state.status = "구글 시트 동기화 중..."
+            auto_sync_to_google_sheet(mode, sync_videos, False, sheet_urls, state.log_history)
+            
+            summary_rows = []
+            summary_rows.append({
+                "벌크 수집 요약": "미수집 채널 벌크 수집 결과",
+                "대상 채널 수": f"{total_bulk}개",
+                "성공 채널 수": f"{success_count}개",
+                "실패 채널 수": f"{total_bulk - success_count}개"
+            })
+            summary_df = pd.DataFrame(summary_rows)
+            
+            state.progress = 1.0
             state.result = {
                 "status": "success",
-                "msg": f"✓ 미수집 채널 벌크 수집 완료! 성공: {success_count}/{total_bulk}개"
+                "msg": f"✓ 미수집 채널 벌크 수집 완료! 성공: {success_count}/{total_bulk}개",
+                "summary_df": summary_df
             }
             
         state.is_running = False
@@ -3459,138 +3609,212 @@ with tabs[2]:
         from modules.sheet_sync import TAB_MAPPING
         st.session_state['sheet_urls'] = {tab: default_sheet_url for tab in TAB_MAPPING.keys()}
 
-    col_col1, col_col2, col_col3 = st.columns([1, 1, 1])
-
-    with col_col1:
-        st.subheader("🏢 채널 정보 수집")
-        
-        # 1. 수동 수집
-        st.markdown("**🔍 수동 입력 수집**")
-        channel_input = st.text_input("채널명 / 핸들 / 채널 URL", placeholder="예: @록터뷰 또는 https://www.youtube.com/@록터뷰")
-        sync_videos_manual = st.checkbox("영상 수집 옵션 연동", value=True, key="sync_videos_manual", help="채널 수집 시, 지정된 영상 범위 설정에 따라 동영상도 함께 수집합니다.")
-        start_channel_btn = st.button("📥 채널 수집 실행", type="primary", use_container_width=True)
-        
-        st.markdown("---")
-        
-        # 2. 구글 시트 연동 수집
-        st.markdown("**📂 구글 시트 연동 수집**")
-        
-        col_c_btn1, col_c_btn2 = st.columns([1, 1])
-        with col_c_btn1:
-            refresh_channels_btn = st.button("🔄 구글시트 채널 갱신", use_container_width=True)
-        
-        if refresh_channels_btn:
-            with st.spinner("구글 시트에서 채널 데이터를 가져오는 중..."):
-                current_url = st.session_state['sheet_urls'].get("채널 리스트", default_sheet_url)
-                from modules.sheet_sync import sync_sheet_to_db
-                try:
-                    res_sync = sync_sheet_to_db(current_url, target_tab="채널 리스트")
-                    imported_rows = res_sync.get("채널 리스트", 0)
-                    st.success(f"✓ 구글시트 동기화 완료: {imported_rows}개 행 가져옴.")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as sync_err:
-                    st.error(f"❌ 동기화 중 에러 발생: {sync_err}")
-                    
-        # 미수집 리스트 조회
-        conn = sqlite3.connect(DB_PATH)
-        df_unfetched = pd.read_sql_query("""
-            SELECT channel_id, channel_name, category1, category2, channel_feature, channel_link, is_fetched 
-            FROM sheet_channels 
-            WHERE is_fetched IS NULL OR is_fetched = '' OR is_fetched != 'ㅇ'
-        """, conn)
-        conn.close()
-        
-        bulk_channels_list = []
-        if not df_unfetched.empty:
-            df_display = df_unfetched.rename(columns={
-                'channel_name': '채널명',
-                'category1': '분야1',
-                'category2': '분야2',
-                'channel_feature': '채널특징',
-                'channel_link': '채널링크'
-            })
-            df_display.insert(0, "선택", False)
-            
-            st.markdown(f"미수집 채널 목록 (총 {len(df_unfetched)}개):")
-            edited_df = st.data_editor(
-                df_display[['선택', '채널명', '분야1', '분야2', '채널특징', '채널링크', 'channel_id']],
-                hide_index=True,
-                disabled=['채널명', '분야1', '분야2', '채널특징', '채널링크', 'channel_id'],
-                use_container_width=True,
-                key="bulk_channel_editor"
-            )
-            
-            selected_channels = edited_df[edited_df["선택"] == True]
-            for idx, row in selected_channels.iterrows():
-                bulk_channels_list.append({
-                    'channel_id': row.get('channel_id'),
-                    'channel_name': row.get('채널명'),
-                    'channel_link': row.get('채널링크')
-                })
+    # 1. 채널 정보 수집
+    st.subheader("🏢 채널 정보 수집")
+    
+    # 1. 수동 수집
+    st.markdown("**🔍 수동 입력 수집**")
+    channel_input = st.text_input("채널명 / 핸들 / 채널 URL", placeholder="예: @록터뷰 또는 https://www.youtube.com/@록터뷰")
+    sync_videos_manual = st.checkbox("영상 수집 옵션 연동", value=True, key="sync_videos_manual", help="채널 수집 시, 지정된 영상 범위 설정에 따라 동영상도 함께 수집합니다.")
+    start_channel_btn = st.button("📥 채널 수집 실행", type="primary", use_container_width=True)
+    
+    st.markdown("---")
+    
+    # 2. 구글 시트 연동 수집
+    st.markdown("**📂 구글 시트 연동 수집**")
+    
+    col_c_btn1, col_c_btn2 = st.columns([1, 1])
+    with col_c_btn1:
+        refresh_channels_btn = st.button("🔄 구글시트 채널 갱신", use_container_width=True)
+    
+    if refresh_channels_btn:
+        with st.spinner("구글 시트에서 채널 데이터를 가져오는 중..."):
+            current_url = st.session_state['sheet_urls'].get("채널 리스트", default_sheet_url)
+            from modules.sheet_sync import sync_sheet_to_db
+            try:
+                res_sync = sync_sheet_to_db(current_url, target_tab="채널 리스트")
+                imported_rows = res_sync.get("채널 리스트", 0)
+                st.success(f"✓ 구글시트 동기화 완료: {imported_rows}개 행 가져옴.")
+                time.sleep(1)
+                st.rerun()
+            except Exception as sync_err:
+                st.error(f"❌ 동기화 중 에러 발생: {sync_err}")
                 
-            st.write(f"선택된 채널 수: {len(bulk_channels_list)}개")
-        else:
-            st.info("미수집 상태의 채널이 없습니다.")
+    # 미수집 리스트 조회
+    conn = sqlite3.connect(DB_PATH)
+    df_unfetched = pd.read_sql_query("""
+        SELECT channel_id, channel_name, category1, category2, channel_feature, channel_link, is_fetched 
+        FROM sheet_channels 
+        WHERE is_fetched IS NULL OR is_fetched = '' OR is_fetched != 'ㅇ'
+    """, conn)
+    conn.close()
+    
+    bulk_channels_list = []
+    if not df_unfetched.empty:
+        df_display = df_unfetched.rename(columns={
+            'channel_name': '채널명',
+            'category1': '분야1',
+            'category2': '분야2',
+            'channel_feature': '채널특징',
+            'channel_link': '채널링크'
+        })
+        df_display.insert(0, "선택", False)
+        
+        st.markdown(f"미수집 채널 목록 (총 {len(df_unfetched)}개):")
+        edited_df = st.data_editor(
+            df_display[['선택', '채널명', '분야1', '분야2', '채널특징', '채널링크', 'channel_id']],
+            hide_index=True,
+            disabled=['채널명', '분야1', '분야2', '채널특징', '채널링크', 'channel_id'],
+            use_container_width=True,
+            key="bulk_channel_editor"
+        )
+        
+        selected_channels = edited_df[edited_df["선택"] == True]
+        for idx, row in selected_channels.iterrows():
+            bulk_channels_list.append({
+                'channel_id': row.get('channel_id'),
+                'channel_name': row.get('채널명'),
+                'channel_link': row.get('채널링크')
+            })
             
-        sync_videos_bulk = st.checkbox("선택 채널 영상도 함께 수집", value=True, key="sync_videos_bulk")
-        start_bulk_btn = st.button("📥 선택한 채널 벌크 수집 실행", type="primary", use_container_width=True, disabled=(len(bulk_channels_list) == 0))
+        st.write(f"선택된 채널 수: {len(bulk_channels_list)}개")
+    else:
+        st.info("미수집 상태의 채널이 없습니다.")
+        
+    sync_videos_bulk = st.checkbox("선택 채널 영상도 함께 수집", value=True, key="sync_videos_bulk")
+    start_bulk_btn = st.button("📥 선택한 채널 벌크 수집 실행", type="primary", use_container_width=True, disabled=(len(bulk_channels_list) == 0))
 
-    with col_col2:
-        st.subheader("🎥 영상 정보 수집")
-        video_input = st.text_input("영상 URL / 재생목록 URL / 채널 식별값", placeholder="예: https://www.youtube.com/watch?v=... 또는 재생목록 주소")
-        
-        video_range = st.radio("수집 범위 설정", ["해당 영상만 수집", "최근 영상 지정 수집 (50개 단위)", "전체 영상 수집", "지정 연도부터 지금까지 수집"], index=1, key="col_video_range")
-        
-        recent_limit = 50
-        since_year = 2024
-        if video_range == "최근 영상 지정 수집 (50개 단위)":
-            recent_limit = st.slider("최근 수집 영상 갯수", 50, 500, 50, 50)
-        elif video_range == "지정 연도부터 지금까지 수집":
-            since_year = st.number_input("기준 연도 입력", min_value=2000, max_value=2030, value=2024)
-            
-        sync_channel = st.checkbox("채널 정보 함께 수집", value=True, help="영상 수집을 수행할 때 해당 영상들의 소속 채널 상세 정보도 함께 수집하여 채널 DB를 갱신합니다.")
-        start_video_btn = st.button("📥 영상 수집 실행", type="primary", use_container_width=True)
+    st.divider()
 
-    with col_col3:
-        st.subheader("📋 재생목록 ID 연동 수집")
-        st.markdown("로컬 DB '재생목록ID' 테이블의 모든 목록을 순회하여 영상을 수집하고, 그 중 채널 DB에 없는 신규 채널들을 추출 및 자동 등록합니다.")
+    # 2. 영상 정보 수집
+    st.subheader("🎥 영상 정보 수집")
+    video_input = st.text_input("영상 URL / 재생목록 URL / 채널 식별값", placeholder="예: https://www.youtube.com/watch?v=... 또는 재생목록 주소")
+    
+    video_range = st.radio("수집 범위 설정", ["해당 영상만 수집", "최근 영상 지정 수집 (50개 단위)", "전체 영상 수집", "지정 연도부터 지금까지 수집"], index=1, key="col_video_range")
+    
+    recent_limit = 50
+    since_year = 2024
+    if video_range == "최근 영상 지정 수집 (50개 단위)":
+        recent_limit = st.slider("최근 수집 영상 갯수", 50, 500, 50, 50)
+    elif video_range == "지정 연도부터 지금까지 수집":
+        since_year = st.number_input("기준 연도 입력", min_value=2000, max_value=2030, value=2024)
         
-        col_p_btn1, col_p_btn2 = st.columns([1, 1])
-        with col_p_btn1:
-            refresh_playlists_btn = st.button("🔄 재생목록 구글시트 갱신", use_container_width=True)
-            
-        if refresh_playlists_btn:
-            with st.spinner("구글 시트에서 재생목록ID 데이터를 가져오는 중..."):
-                current_url = st.session_state['sheet_urls'].get("재생목록ID", default_sheet_url)
-                from modules.sheet_sync import sync_sheet_to_db
-                try:
-                    res_sync = sync_sheet_to_db(current_url, target_tab="재생목록ID")
-                    imported_rows = res_sync.get("재생목록ID", 0)
-                    st.success(f"✓ 구글시트 동기화 완료: {imported_rows}개 행 가져옴.")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as sync_err:
-                    st.error(f"❌ 동기화 중 에러 발생: {sync_err}")
-                    
-        # 재생목록ID 목록 조회
-        conn = sqlite3.connect(DB_PATH)
-        df_pids = pd.read_sql_query("SELECT playlist_id FROM sheet_playlist_ids", conn)
-        conn.close()
+    sync_channel = st.checkbox("채널 정보 함께 수집", value=True, help="영상 수집을 수행할 때 해당 영상들의 소속 채널 상세 정보도 함께 수집하여 채널 DB를 갱신합니다.")
+    start_video_btn = st.button("📥 영상 수집 실행", type="primary", use_container_width=True)
+
+    st.divider()
+
+    # 3. 재생목록 ID 연동 수집
+    st.subheader("📋 재생목록 ID 연동 수집")
+    st.markdown("로컬 DB '재생목록ID' 테이블의 모든 목록을 순회하여 영상을 수집하고, 그 중 채널 DB에 없는 신규 채널들을 추출 및 자동 등록합니다.")
+    
+    col_p_btn1, col_p_btn2 = st.columns([1, 1])
+    with col_p_btn1:
+        refresh_playlists_btn = st.button("🔄 재생목록 구글시트 갱신", use_container_width=True)
         
-        if not df_pids.empty:
-            st.markdown(f"등록된 재생목록 ID (총 {len(df_pids)}개):")
-            st.dataframe(df_pids, use_container_width=True, hide_index=True)
-        else:
-            st.info("등록된 재생목록 ID가 없습니다. 먼저 갱신을 실행해 주세요.")
+    if refresh_playlists_btn:
+        with st.spinner("구글 시트에서 재생목록ID 데이터를 가져오는 중..."):
+            current_url = st.session_state['sheet_urls'].get("재생목록ID", default_sheet_url)
+            from modules.sheet_sync import sync_sheet_to_db
+            try:
+                res_sync = sync_sheet_to_db(current_url, target_tab="재생목록ID")
+                imported_rows = res_sync.get("재생목록ID", 0)
+                st.session_state['playlist_sel_df'] = None # 세션 초기화 유발
+                st.success(f"✓ 구글시트 동기화 완료: {imported_rows}개 행 가져옴.")
+                time.sleep(1)
+                st.rerun()
+            except Exception as sync_err:
+                st.error(f"❌ 동기화 중 에러 발생: {sync_err}")
+                
+    # 재생목록ID 목록 조회
+    conn = sqlite3.connect(DB_PATH)
+    df_pids = pd.read_sql_query("""
+        SELECT playlist_id, playlist_name, video_count, last_checked_at 
+        FROM sheet_playlist_ids
+    """, conn)
+    conn.close()
+    
+    selected_pids = []
+    if not df_pids.empty:
+        # 세션 상태 초기화 및 관리
+        if 'playlist_sel_df' not in st.session_state or st.session_state['playlist_sel_df'] is None or len(st.session_state['playlist_sel_df']) != len(df_pids):
+            df_pids_display = df_pids.rename(columns={
+                'playlist_name': '재생목록 이름',
+                'playlist_id': '재생목록 ID',
+                'video_count': '영상갯수',
+                'last_checked_at': '마지막 체크일'
+            })
+            # '재생목록 이름' 컬럼이 '재생목록 ID' 왼쪽에 위치하도록 순서 재배열
+            df_pids_display = df_pids_display[['재생목록 이름', '재생목록 ID', '영상갯수', '마지막 체크일']]
+            # 재생목록 ID 테이블의 체크박스 선택 기본값은 체크해제(False)로 설정
+            df_pids_display.insert(0, '선택', False)
+            st.session_state['playlist_sel_df'] = df_pids_display
+            st.session_state['playlist_editor_version'] = 0
             
-        start_playlist_btn = st.button("📥 재생목록 채널 수집 실행", type="primary", use_container_width=True, disabled=df_pids.empty)
+        st.markdown(f"등록된 재생목록 ID (총 {len(df_pids)}개):")
+        
+        # 전체 선택 / 전체 선택해제 버튼
+        col_sel1, col_sel2 = st.columns([1, 1])
+        with col_sel1:
+            if st.button("☑️ 전체 선택", key="btn_playlist_select_all", use_container_width=True):
+                st.session_state['playlist_sel_df']['선택'] = True
+                st.session_state['playlist_editor_version'] = st.session_state.get('playlist_editor_version', 0) + 1
+                st.rerun()
+        with col_sel2:
+            if st.button("☒ 전체 선택해제", key="btn_playlist_deselect_all", use_container_width=True):
+                st.session_state['playlist_sel_df']['선택'] = False
+                st.session_state['playlist_editor_version'] = st.session_state.get('playlist_editor_version', 0) + 1
+                st.rerun()
+        
+        version = st.session_state.get('playlist_editor_version', 0)
+        
+        # 사용자 체크박스 편집을 위한 data_editor
+        edited_df = st.data_editor(
+            st.session_state['playlist_sel_df'],
+            column_config={
+                "선택": st.column_config.CheckboxColumn(
+                    "선택",
+                    help="수집할 재생목록을 선택해 주세요.",
+                    default=False
+                )
+            },
+            disabled=["재생목록 ID", "재생목록 이름", "영상갯수", "마지막 체크일"],
+            hide_index=True,
+            use_container_width=True,
+            key=f"playlist_editor_widget_v{version}"
+        )
+        
+        # 에디터 수정값을 세션에 즉각 동기화
+        st.session_state['playlist_sel_df'] = edited_df
+        
+        # 선택된 재생목록 ID 필터링
+        selected_rows = edited_df[edited_df['선택'] == True]
+        selected_pids = selected_rows['재생목록 ID'].tolist()
+    else:
+        st.info("등록된 재생목록 ID가 없습니다. 먼저 갱신을 실행해 주세요.")
+        
+    col_p_btn_run1, col_p_btn_run2 = st.columns([1, 1])
+    with col_p_btn_run1:
+        start_selected_playlist_btn = st.button(
+            "📥 선택 재생목록 채널 수집", 
+            type="primary", 
+            use_container_width=True, 
+            disabled=df_pids.empty or not selected_pids,
+            help="체크박스로 선택한 재생목록에 속한 영상을 크롤링하여 채널을 수집합니다."
+        )
+    with col_p_btn_run2:
+        start_all_playlist_btn = st.button(
+            "📥 전체 재생목록 채널 수집", 
+            use_container_width=True, 
+            disabled=df_pids.empty,
+            help="체크 여부와 상관없이 모든 재생목록을 순회하며 채널을 수집합니다."
+        )
 
     st.markdown("---")
     st.subheader("📺 실시간 수집 작업 현황판")
 
     # 스레드 기동 로직
-    if start_channel_btn or start_video_btn or start_bulk_btn or start_playlist_btn:
+    if start_channel_btn or start_video_btn or start_bulk_btn or start_selected_playlist_btn or start_all_playlist_btn:
         if start_channel_btn and not channel_input.strip():
             st.error("채널 식별 정보를 입력해 주세요.")
         elif start_video_btn and not video_input.strip():
@@ -3598,6 +3822,7 @@ with tabs[2]:
         elif start_bulk_btn and len(bulk_channels_list) == 0:
             st.error("선택된 벌크 수집 채널이 없습니다.")
         else:
+            active_pids = None
             if start_channel_btn:
                 mode = 'channel'
                 c_input = channel_input
@@ -3616,12 +3841,14 @@ with tabs[2]:
                 v_input = ""
                 s_v = sync_videos_bulk
                 s_c = False
-            elif start_playlist_btn:
+            elif start_selected_playlist_btn or start_all_playlist_btn:
                 mode = 'playlist'
                 c_input = ""
                 v_input = ""
                 s_v = False
                 s_c = False
+                if start_selected_playlist_btn:
+                    active_pids = selected_pids
                 
             st.session_state['collection_running'] = True
             st.session_state['collection_stop_requested'] = False
@@ -3662,7 +3889,9 @@ with tabs[2]:
                     v_range_mapped,
                     recent_limit,
                     since_year,
-                    bulk_channels_list
+                    bulk_channels_list,
+                    active_pids,
+                    st.session_state.get('sheet_urls')
                 ),
                 daemon=True
             )
@@ -3709,6 +3938,9 @@ with tabs[2]:
             res = st.session_state['collection_result']
             if res.get('status') == 'success':
                 st.success(res.get('msg'))
+                if 'summary_df' in res and res['summary_df'] is not None and not res['summary_df'].empty:
+                    st.markdown("### 📊 수집 완료 결과 요약")
+                    st.dataframe(res['summary_df'], use_container_width=True, hide_index=True)
             else:
                 st.error(res.get('msg'))
 
@@ -4190,7 +4422,12 @@ with tabs[5]:
     st.markdown("---")
     
     # 🔍 데이터 조회 및 필터링
-    st.subheader(f"🔍 '{selected_tab}' 데이터 실시간 필터링 조회")
+    col_ref1, col_ref2 = st.columns([5, 1])
+    with col_ref1:
+        st.subheader(f"🔍 '{selected_tab}' 데이터 실시간 필터링 조회")
+    with col_ref2:
+        if st.button("🔄 데이터 새로고침", key=f"btn_refresh_data_{selected_tab}", use_container_width=True):
+            st.rerun()
     
     # DB 데이터 가져와 Pandas DataFrame 변환
     conn = get_db_connection()
@@ -4203,7 +4440,21 @@ with tabs[5]:
         else:
             df_tab = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY original_row_order ASC", conn)
     except Exception as read_err:
-        st.warning(f"로컬 DB에 '{selected_tab}' 데이터가 존재하지 않습니다. 먼저 가져오기를 실행해 주세요.")
+        err_msg = str(read_err)
+        # 만약 original_row_order 컬럼이 없어서 발생한 오류인 경우, 정렬 없이 조회하도록 폴백 처리
+        if "no such column: original_row_order" in err_msg:
+            try:
+                logger.warning(f"'{table_name}' 테이블에 'original_row_order' 컬럼이 없어 정렬 없이 조회를 시도합니다.")
+                if table_name == "sheet_videos":
+                    df_tab = pd.read_sql_query("SELECT * FROM sheet_videos WHERE tab_name = ?", conn, params=(selected_tab,))
+                else:
+                    df_tab = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+            except Exception as retry_err:
+                logger.error(f"로컬 DB '{selected_tab}' 조회 최종 실패: {retry_err}", exc_info=True)
+                st.warning(f"로컬 DB에 '{selected_tab}' 데이터가 존재하지 않거나 조회가 불가능합니다. (에러: {retry_err})")
+        else:
+            logger.error(f"로컬 DB '{selected_tab}' 조회 실패: {read_err}", exc_info=True)
+            st.warning(f"로컬 DB에 '{selected_tab}' 데이터가 존재하지 않거나 조회가 불가능합니다. 먼저 가져오기를 실행해 주세요. (에러: {read_err})")
         
     conn.close()
     

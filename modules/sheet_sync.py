@@ -57,6 +57,43 @@ def is_new_date_newer(old_date_str, new_date_str):
     return str(new_date_str) > str(old_date_str)
 
 
+def format_datetime_for_sheet(val):
+    """
+    ISO 8601 형식의 날짜 문자열(예: 2025-05-24T03:16:00.971228Z)을
+    구글 시트가 정상적으로 날짜로 인식하여 기존 서식을 따를 수 있도록
+    T와 Z를 제거하고 YYYY-MM-DD HH:MM:SS 형태로 포맷팅합니다.
+    """
+    if not val or not isinstance(val, str):
+        return val
+    # URL 형식인 경우 날짜 변환 방지
+    if val.startswith('http://') or val.startswith('https://'):
+        return val
+    # 연도-월-일 포맷으로 시작하지 않는 경우 날짜 변환 방지
+    import re
+    if not re.match(r'^\d{4}-\d{2}-\d{2}', val):
+        return val
+        
+    # ISO 8601 문자열 검사 (T가 포함되어 있고 Z가 끝에 있거나 timezone offset이 있는 경우)
+    if 'T' in val and (val.endswith('Z') or '+' in val or '-' in val.split('T')[1]):
+        try:
+            clean_val = val
+            if clean_val.endswith('Z'):
+                clean_val = clean_val[:-1] + '+00:00'
+            dt = datetime.fromisoformat(clean_val)
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            try:
+                temp = val.replace('T', ' ')
+                if '.' in temp:
+                    temp = temp.split('.')[0]
+                elif 'Z' in temp:
+                    temp = temp.replace('Z', '')
+                return temp.strip()
+            except Exception:
+                return val
+    return val
+
+
 def get_tab_header_row_num(tab_name):
     """탭별 진짜 헤더가 위치한 행 번호 (1-indexed)"""
     if tab_name == "재생목록ID":
@@ -210,7 +247,7 @@ def sync_sheet_to_db(sheet_url, creds_path=None, target_tab=None):
                     
                 elif table_name == "sheet_channels":
                     cid = row_dict.get('channel_id')
-                    if not cid or str(cid).strip() == '':
+                    if not cid or str(cid).strip() == '' or cid == 'UC_BULK_TEST_9999':
                         continue
                     entity_id = cid
                     row_dict['original_row_order'] = row_idx + data_start_idx + 1
@@ -227,6 +264,9 @@ def sync_sheet_to_db(sheet_url, creds_path=None, target_tab=None):
                     if not pid or str(pid).strip() == '':
                         continue
                     entity_id = pid
+                    row_dict['original_row_order'] = row_idx + data_start_idx + 1
+                    # 마지막 체크일 헤더열은 업데이트 시간(현재 실행 시간)을 기준으로 지정
+                    row_dict['last_checked_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     
                     if pid in db_existing_cache:
                         is_exist = True
@@ -292,6 +332,16 @@ def sync_db_to_sheet(sheet_url, tab_name, creds_path=None):
     if not headers:
         raise ValueError(f"시트 '{tab_name}' 탭의 헤더가 비어 있습니다.")
 
+    # 9행(혹은 1행) 헤더 기준 전역 수식(FORMULA)이 걸려있는 컬럼 식별
+    formula_col_indices = []
+    try:
+        headers_formula = worksheet.row_values(header_row, value_render_option='FORMULA')
+        formula_col_indices = [idx for idx, cell in enumerate(headers_formula) if str(cell).startswith('=')]
+        if formula_col_indices:
+            logger.info(f"구글 시트 '{tab_name}' 탭에서 수식 컬럼 감지 (0-indexed): {formula_col_indices}")
+    except Exception as formula_err:
+        logger.warning(f"⚠️ 헤더 수식 컬럼 감지 중 예외 발생: {formula_err}")
+
     # DB 테이블의 실제 컬럼명 조회
     cursor.execute(f"PRAGMA table_info({table_name})")
     db_cols = [col['name'] for col in cursor.fetchall()]
@@ -350,9 +400,21 @@ def sync_db_to_sheet(sheet_url, tab_name, creds_path=None):
             row_dict = calculate_sheet_video_metrics(row_dict)
         elif table_name == "sheet_channels":
             row_dict = calculate_sheet_channel_metrics(row_dict)
+        elif table_name == "sheet_playlist_ids":
+            # 내보내기(업데이트) 기준의 현재 시간으로 갱신
+            current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            row_dict['last_checked_at'] = current_time_str
+            # DB에도 마지막 체크일 최신화 반영
+            try:
+                cursor.execute(
+                    "UPDATE sheet_playlist_ids SET last_checked_at = ? WHERE playlist_id = ?",
+                    (current_time_str, row_dict['playlist_id'])
+                )
+            except Exception as db_up_err:
+                logger.debug(f"Failed to update last_checked_at in DB: {db_up_err}")
 
         r_id = row_dict.get(id_col_name)
-        if not r_id or str(r_id).strip() == '':
+        if not r_id or str(r_id).strip() == '' or r_id == 'UC_BULK_TEST_9999':
             continue
 
         if r_id in sheet_existing_rows:
@@ -380,11 +442,14 @@ def sync_db_to_sheet(sheet_url, tab_name, creds_path=None):
     sheet_data = []
     for r_id, row_dict in sorted_merged_rows:
         sheet_row = []
-        for col_name in col_mappings:
-            if col_name:
+        for col_idx, col_name in enumerate(col_mappings):
+            if col_idx in formula_col_indices:
+                sheet_row.append("")  # 수식이 지정된 열은 자동 계산되므로 빈 셀로 설정하여 업데이트 생략
+            elif col_name:
                 val = row_dict.get(col_name, "")
                 if val is None:
                     val = ""
+                val = format_datetime_for_sheet(val)
                 sheet_row.append(str(val))
             else:
                 sheet_row.append("")  # DB와 매치되지 않는 시트 열은 빈 셀로 둠
@@ -420,7 +485,45 @@ def sync_db_to_sheet(sheet_url, tab_name, creds_path=None):
             chunk_range = f"A{chunk_start_row}:{end_col_letter}{chunk_end_row}"
             
             logger.info(f"-> 청크 전송: {chunk_range} ({len(chunk)}개 행)")
-            worksheet.update(chunk_range, chunk)
+            worksheet.update(chunk_range, chunk, value_input_option='USER_ENTERED')
+            
+        # 기존 구글 시트 열 서식 복사 적용 (10행 기준, 재생목록ID 탭은 2행 기준)
+        try:
+            sheet_id = getattr(worksheet, 'id', worksheet._properties.get('sheetId'))
+            source_row_idx = 1 if tab_name == "재생목록ID" else 9
+            dest_start_row_idx = source_row_idx + 1 # 그 바로 다음 행부터
+            dest_end_row_idx = data_start_row + total_rows  # 마지막 데이터 행
+            
+            if dest_end_row_idx > dest_start_row_idx:
+                logger.info(f"구글 시트 '{tab_name}' 서식 복사 적용: 소스 {source_row_idx + 1}행 -> 대상 {dest_start_row_idx + 1}행~{dest_end_row_idx}행")
+                body = {
+                    "requests": [
+                        {
+                            "copyPaste": {
+                                "source": {
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": source_row_idx,
+                                    "endRowIndex": source_row_idx + 1,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": col_count
+                                },
+                                "destination": {
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": dest_start_row_idx,
+                                    "endRowIndex": dest_end_row_idx,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": col_count
+                                },
+                                "pasteType": "PASTE_FORMAT",
+                                "pasteOrientation": "NORMAL"
+                            }
+                        }
+                    ]
+                }
+                sh.batch_update(body)
+                logger.info("✓ 구글 시트 서식 복사 적용 완료")
+        except Exception as format_err:
+            logger.warning(f"⚠️ 구글 시트 서식 복사 중 오류 발생: {format_err}")
             
         logger.info(f"✓ 구글 시트 '{tab_name}' (URL: {sheet_url}) 내보내기 완료")
         return total_rows

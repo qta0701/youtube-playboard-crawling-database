@@ -273,7 +273,7 @@ class YouTubeManager:
 
         return result
 
-    def sync_channel(self, channel_url: str, channel_name: str = None, subscriber_count: int = None, use_search_fallback: bool = False) -> dict:
+    def sync_channel(self, channel_url: str, channel_name: str = None, subscriber_count: int = None, use_search_fallback: bool = False, is_fetched: str = 'ㅇ') -> dict:
         """
         채널 동기화 (Tiered Recovery Strategy: Zero-Cost → Low-Cost → High-Cost)
 
@@ -307,11 +307,22 @@ class YouTubeManager:
             'error': None
         }
 
+        # Step 0: Block UC_BULK_TEST_9999
+        if channel_url == 'UC_BULK_TEST_9999' or channel_name == 'UC_BULK_TEST_9999':
+            result['error'] = 'Blocked channel ID (UC_BULK_TEST_9999)'
+            logger.warning(f"Blocked search or sync for channel: UC_BULK_TEST_9999")
+            return result
+
         # === Tiered Recovery Strategy ===
 
         # Step 1: Zero-Cost - URL 파싱
         logger.debug(f"[Step 1: Zero-Cost] Attempting URL parsing...")
         channel_id = get_channel_id_from_url(channel_url)
+        if channel_id == 'UC_BULK_TEST_9999':
+            result['error'] = 'Blocked channel ID (UC_BULK_TEST_9999)'
+            logger.warning(f"Blocked sync for parsed channel ID: UC_BULK_TEST_9999")
+            return result
+            
         if channel_id:
             result['channel_id'] = channel_id
             result['recovery_method'] = 'url'
@@ -368,6 +379,10 @@ class YouTubeManager:
             return result
 
         result['channel_id'] = channel_id
+        if channel_id == 'UC_BULK_TEST_9999':
+            result['error'] = 'Blocked channel ID (UC_BULK_TEST_9999)'
+            logger.warning(f"Blocked final sync for channel ID: UC_BULK_TEST_9999")
+            return result
 
         # DB에 기존 채널 정보가 이미 존재하면 추가 수집하지 않고 패스(중복 방지)
         try:
@@ -456,7 +471,7 @@ class YouTubeManager:
 
             # 5. DB 저장
             logger.debug("Saving channel to database...")
-            self._save_channel(data)
+            self._save_channel(data, is_fetched=is_fetched)
 
             result['success'] = True
             result['data'] = data
@@ -476,7 +491,7 @@ class YouTubeManager:
 
         return result
 
-    def _save_channel(self, data: dict):
+    def _save_channel(self, data: dict, is_fetched: str = 'ㅇ'):
         """채널 데이터를 sheet_channels 테이블에 저장"""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -497,7 +512,7 @@ class YouTubeManager:
                 'channel_handle': data.get('channel_handle', ''),
                 'created_at': data.get('created_at', ''),
                 'channel_country': data.get('channel_country', ''),
-                'is_fetched': 'ㅇ'
+                'is_fetched': is_fetched
             }
 
             # existing data check for original_row_order
@@ -533,6 +548,10 @@ class YouTubeManager:
             'quota_used': 0,
             'error': None
         }
+
+        if channel_id == 'UC_BULK_TEST_9999':
+            result['error'] = 'Blocked channel ID (UC_BULK_TEST_9999)'
+            return result
 
         if not self.youtube:
             result['error'] = 'YouTube API not initialized'

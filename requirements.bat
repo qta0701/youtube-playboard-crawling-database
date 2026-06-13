@@ -81,12 +81,18 @@ echo.
 echo [5/8] Installing required packages from requirements.txt...
 echo This may take several minutes on first installation...
 pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to install packages
-    echo Please check your internet connection and try again
-    pause
-    exit /b 1
-)
+if %errorlevel% equ 0 goto install_success
+
+:: pip가 캐시 에러 등으로 non-zero를 리턴했어도, 실제 패키지가 정상 임포트되는지 더블 체크하여 예외를 보완합니다.
+python -c "import selenium, pandas, bs4, googleapiclient, youtube_transcript_api, undetected_chromedriver, selenium_stealth, streamlit, plotly" >nul 2>&1
+if %errorlevel% equ 0 goto install_success
+
+echo [ERROR] Failed to install packages
+echo Please check your internet connection and try again
+pause
+exit /b 1
+
+:install_success
 echo [SUCCESS] All packages installed successfully
 echo.
 
@@ -133,16 +139,16 @@ echo Installation completed successfully!
 echo ========================================
 echo.
 echo Installed packages:
-echo - Selenium 4.15.2 (Web automation)
-echo - Pandas 2.1.3 (Data processing)
-echo - BeautifulSoup4 4.12.2 (HTML parsing)
-echo - Google API Client 2.108.0 (YouTube Data API)
-echo - YouTube Transcript API 0.6.1
-echo - webdriver-manager 4.0.1 (Automatic ChromeDriver)
+echo - Selenium 4.15.2+ (Web automation)
+echo - Pandas 2.2.3+ (Data processing)
+echo - BeautifulSoup4 4.12.2+ (HTML parsing)
+echo - Google API Client 2.108.0+ (YouTube Data API)
+echo - YouTube Transcript API 0.6.1+
+echo - webdriver-manager 4.0.1+ (Automatic ChromeDriver)
 echo - selenium-stealth (Chrome Bot Detection Avoidance)
-echo - undetected-chromedriver 3.5.5 (Legacy Bot Detection Avoidance)
-echo - Streamlit 1.29.0 (Interactive App Dashboard)
-echo - Plotly 5.18.0 (Interactive Charts Library)
+echo - undetected-chromedriver 3.5.5+ (Legacy Bot Detection Avoidance)
+echo - Streamlit 1.58.0+ (Interactive App Dashboard)
+echo - Plotly 5.18.0+ (Interactive Charts Library)
 echo - And all dependencies
 echo.
 echo ========================================

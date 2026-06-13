@@ -356,6 +356,7 @@ class DatabaseHandler:
                 playlist_name TEXT,
                 video_count INTEGER DEFAULT 0,
                 last_checked_at TEXT,
+                original_row_order INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -394,6 +395,9 @@ class DatabaseHandler:
             # 구글 시트 연동 통합 DB 마이그레이션 - 채널삭제여부 추가
             ('sheet_channels', 'is_deleted_channel', 'TEXT'),
             ('sheet_videos', 'is_deleted_channel', 'TEXT'),
+            
+            # 재생목록 ID 연동 마이그레이션 - 원래 행 순서 컬럼 추가
+            ('sheet_playlist_ids', 'original_row_order', 'INTEGER'),
         ]
 
         for table, column, col_type in migrations:
@@ -406,7 +410,7 @@ class DatabaseHandler:
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
                     logger.info(f"Migration: Added column '{column}' to table '{table}'")
             except Exception as e:
-                logger.debug(f"Migration check for {table}.{column}: {e}")
+                logger.warning(f"Migration check/failed for {table}.{column}: {e}", exc_info=True)
 
         self.conn.commit()
 
