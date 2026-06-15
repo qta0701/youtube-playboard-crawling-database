@@ -583,6 +583,11 @@ def find_existing_batch_file_runner(target_type, category, country, period, crit
     
     for f in files:
         if pattern_regex.match(f):
+            # '조회수 순위' 탐색 중인데 파일명에 타 criteria(좋아요, 댓글) 명칭이 있으면 스킵
+            if safe_criteria in ['조회수 순위', '조회수_순위', '조회수']:
+                other_criteria = ['좋아요 순위', '좋아요_순위', '좋아요', '댓글 순위', '댓글_순위', '댓글']
+                if any(oc in f for oc in other_criteria):
+                    continue
             full_path = os.path.join(target_dir, f)
             matching_files.append(full_path)
             

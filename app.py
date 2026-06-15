@@ -33,6 +33,15 @@ logger = setup_logger('crawler')
 # 공통 유틸 및 크롤러 기동 엔진 임포트
 from app_utils import get_actual_ranking_date_str, standardize_dataframe_types, load_and_standardize_csv
 from modules.crawler_runner import run_crawling_by_criteria, find_existing_batch_file_runner
+def find_existing_batch_file(base_dir, target_type, category, country, period, criteria=None, ranking_date=None):
+    return find_existing_batch_file_runner(
+        target_type=target_type,
+        category=category,
+        country=country,
+        period=period,
+        criteria=criteria,
+        ranking_date=ranking_date
+    )
 
 # Streamlit 페이지 설정 (프리미엄 테마 적용)
 st.set_page_config(
@@ -954,9 +963,79 @@ with tabs[1]:
                 conn.close()
                 
             if not df_dash.empty:
-                # 비율 계산
                 is_ch = "채널" in type_tab
                 
+                # -------------------------------------------------------------
+                # [수치 지표 자동 병합 및 정합성 보정 로직 (GroupBy & Max Aggregation)]
+                # -------------------------------------------------------------
+                df_dash = df_dash.copy()
+                
+                # 수치형 컬럼 표준화
+                numeric_cols_to_fill = ['views', 'likes', 'comments', 'total_views']
+                for col in numeric_cols_to_fill:
+                    if col in df_dash.columns:
+                        df_dash[col] = pd.to_numeric(df_dash[col], errors='coerce').fillna(0).astype('int64')
+                
+                # crawled_at 파싱 컬럼 임시 생성
+                if 'crawled_at' in df_dash.columns:
+                    df_dash['crawled_at_parsed'] = pd.to_datetime(df_dash['crawled_at'], errors='coerce')
+                else:
+                    df_dash['crawled_at_parsed'] = pd.NaT
+                
+                # 고유 식별자 merge_key 생성
+                def make_merge_key(row, is_channel):
+                    if is_channel:
+                        return str(row.get('channel_name', '')).strip()
+                    else:
+                        vid = str(row.get('video_id', '')).strip()
+                        if vid and vid != 'N/A' and vid != 'None':
+                            return f"vid_{vid}"
+                        title = str(row.get('title', '')).strip()
+                        ch = str(row.get('channel_name', '')).strip()
+                        return f"tc_{title}_{ch}"
+                
+                df_dash['merge_key'] = df_dash.apply(lambda r: make_merge_key(r, is_ch), axis=1)
+                
+                # 그룹 내 수치형 컬럼의 최대값(max) 연산
+                agg_cols = [c for c in ['views', 'likes', 'comments', 'total_views'] if c in df_dash.columns]
+                max_metrics = df_dash.groupby('merge_key')[agg_cols].max().reset_index()
+                
+                # 대표 행 선정을 위한 우선순위 정렬
+                # (1) 사용자가 선택한 criteria와 일치하는 행을 최우선순위로
+                if 'criteria' in df_dash.columns:
+                    df_dash['is_selected_crit'] = df_dash['criteria'].astype(str) == str(selected_criteria)
+                else:
+                    df_dash['is_selected_crit'] = True
+                
+                sort_keys = ['is_selected_crit']
+                sort_asc = [False] # True가 먼저 오도록 내림차순
+                
+                if 'crawled_at_parsed' in df_dash.columns:
+                    sort_keys.append('crawled_at_parsed')
+                    sort_asc.append(False)
+                if 'id' in df_dash.columns:
+                    sort_keys.append('id')
+                    sort_asc.append(False)
+                if 'rank' in df_dash.columns:
+                    sort_keys.append('rank')
+                    sort_asc.append(True)
+                
+                df_dash = df_dash.sort_values(by=sort_keys, ascending=sort_asc)
+                
+                # 대표 행 1건만 남김 (중복 제거)
+                df_dash = df_dash.drop_duplicates(subset=['merge_key'], keep='first')
+                
+                # 대표 행의 기존 수치 제거 후 그룹 최대값 병합
+                df_dash.drop(columns=agg_cols, inplace=True)
+                df_dash = pd.merge(df_dash, max_metrics, on='merge_key', how='left')
+                
+                # 사용자가 선택한 criteria와 일치하는 대표 행만 최종 유지하여 타 criteria 전용 영상 노출 방지
+                if 'is_selected_crit' in df_dash.columns:
+                    df_dash = df_dash[df_dash['is_selected_crit'] == True]
+                
+                # -------------------------------------------------------------
+                
+                # 비율 계산
                 def calc_ratio(row, is_channel):
                     sub_val = row.get('subscriber_count')
                     if is_channel:
@@ -1158,7 +1237,7 @@ with tabs[1]:
                     debug_file_path = existing_filepath if existing_filepath else "DB 직접 조회 (백업 파일 없음)"
                     debug_file_name = os.path.basename(existing_filepath) if existing_filepath else "N/A"
                     
-                    # 상위 1~10위 영상 데이터 축소 변환
+                    # 상위 1~10위 영상 데이터 축소 변환 (개별 원본 파일 및 수치 추적)
                     debug_items = []
                     if not df_filtered.empty:
                         top_df = df_filtered.head(10)
@@ -1166,24 +1245,75 @@ with tabs[1]:
                             title_val = row.get("title", row.get("channel_name", "N/A"))
                             ch_val = row.get("channel_name", "N/A")
                             rank_val = row.get("rank", idx)
-                            metric_val = 0
-                            if "채널" in type_tab:
-                                metric_val = row.get("total_views", row.get("subscriber_count", 0))
-                            else:
-                                if selected_criteria == "조회수 순위":
-                                    metric_val = row.get("views", 0)
-                                elif selected_criteria == "좋아요 순위":
-                                    metric_val = row.get("likes", 0)
-                                elif selected_criteria == "댓글 순위":
-                                    metric_val = row.get("comments", 0)
+                            row_cat = row.get("category", "N/A")
+                            row_criteria = row.get("criteria", selected_criteria)
                             
-                            debug_items.append({
+                            # batch_ 접두사 처리
+                            search_cat_row = row_cat if row_cat != "All" else "ALL"
+                            if search_cat_row != "ALL" and search_cat_row != "전체" and not str(search_cat_row).startswith("batch_"):
+                                search_cat_row = f"batch_{search_cat_row}"
+                            
+                            row_filepath = find_existing_batch_file(
+                                base_dir=Config.OUTPUT_DIR,
+                                target_type=actual_target,
+                                category=search_cat_row,
+                                country=selected_country,
+                                period=selected_period,
+                                criteria=row_criteria,
+                                ranking_date=selected_date
+                            )
+                            row_file_name = os.path.basename(row_filepath) if row_filepath else "N/A"
+                            
+                            # CSV 내 행 번호 추적 (헤더 제외 1-indexed)
+                            row_index_val = "N/A"
+                            if row_filepath and os.path.exists(row_filepath):
+                                try:
+                                    temp_df = pd.read_csv(row_filepath)
+                                    match_idx = None
+                                    v_id = row.get("video_id")
+                                    if v_id and str(v_id) != 'N/A' and str(v_id) != 'None':
+                                        matches = temp_df[temp_df['Video ID'].astype(str) == str(v_id)]
+                                        if not matches.empty:
+                                            match_idx = matches.index[0]
+                                    
+                                    if match_idx is None:
+                                        t_val = row.get("title")
+                                        c_val = row.get("channel_name")
+                                        matches = temp_df[(temp_df['Video Title'].astype(str) == str(t_val)) & (temp_df['Channel Name'].astype(str) == str(c_val))]
+                                        if not matches.empty:
+                                            match_idx = matches.index[0]
+                                            
+                                    if match_idx is not None:
+                                        row_index_val = f"{match_idx + 2}행"
+                                except Exception as trace_err:
+                                    logger.warning(f"Failed to trace row index in debug: {trace_err}")
+                            
+                            is_channel_type = "채널" in type_tab
+                            if is_channel_type:
+                                v_views = int(row.get("total_views", 0)) if "total_views" in row else 0
+                                v_subscribers = int(parse_count_string(row.get("subscriber_count", "0"))) if "subscriber_count" in row else 0
+                            else:
+                                v_views = int(row.get("views", 0)) if "views" in row else 0
+                                v_likes = int(row.get("likes", 0)) if "likes" in row else 0
+                                v_comments = int(row.get("comments", 0)) if "comments" in row else 0
+                            
+                            item_dict = {
                                 "순위": f"{rank_val}위",
                                 "제목/채널": title_val,
                                 "채널명": ch_val,
-                                "주요수치": metric_val,
-                                "카테고리": row.get("category", "N/A")
-                            })
+                                "참고_파일명": row_file_name,
+                                "참고_행번호": row_index_val,
+                                "카테고리": row_cat
+                            }
+                            if is_channel_type:
+                                item_dict["총조회수"] = v_views
+                                item_dict["구독자수"] = v_subscribers
+                            else:
+                                item_dict["조회수"] = v_views
+                                item_dict["좋아요수"] = v_likes
+                                item_dict["댓글수"] = v_comments
+                                
+                            debug_items.append(item_dict)
                     
                     debug_json_data = {
                         "디버그_실행시간": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1960,7 +2090,7 @@ with tabs[1]:
                     debug_file_path = existing_filepath if existing_filepath else "DB 직접 조회 (백업 파일 없음)"
                     debug_file_name = os.path.basename(existing_filepath) if existing_filepath else "N/A"
                     
-                    # 상위 1~10위 영상 데이터 축소 변환
+                    # 상위 1~10위 영상 데이터 축소 변환 (개별 원본 파일 및 수치 추적)
                     debug_items = []
                     if not df_filtered.empty:
                         top_df = df_filtered.head(10)
@@ -1968,24 +2098,75 @@ with tabs[1]:
                             title_val = row.get("title", row.get("channel_name", "N/A"))
                             ch_val = row.get("channel_name", "N/A")
                             rank_val = row.get("rank", idx)
-                            metric_val = 0
-                            if "채널" in type_tab:
-                                metric_val = row.get("total_views", row.get("subscriber_count", 0))
-                            else:
-                                if selected_criteria == "조회수 순위":
-                                    metric_val = row.get("views", 0)
-                                elif selected_criteria == "좋아요 순위":
-                                    metric_val = row.get("likes", 0)
-                                elif selected_criteria == "댓글 순위":
-                                    metric_val = row.get("comments", 0)
+                            row_cat = row.get("category", "N/A")
+                            row_criteria = row.get("criteria", selected_criteria)
                             
-                            debug_items.append({
+                            # batch_ 접두사 처리
+                            search_cat_row = row_cat if row_cat != "All" else "ALL"
+                            if search_cat_row != "ALL" and search_cat_row != "전체" and not str(search_cat_row).startswith("batch_"):
+                                search_cat_row = f"batch_{search_cat_row}"
+                            
+                            row_filepath = find_existing_batch_file(
+                                base_dir=Config.OUTPUT_DIR,
+                                target_type=actual_target,
+                                category=search_cat_row,
+                                country=selected_country,
+                                period=selected_period,
+                                criteria=row_criteria,
+                                ranking_date=selected_date
+                            )
+                            row_file_name = os.path.basename(row_filepath) if row_filepath else "N/A"
+                            
+                            # CSV 내 행 번호 추적 (헤더 제외 1-indexed)
+                            row_index_val = "N/A"
+                            if row_filepath and os.path.exists(row_filepath):
+                                try:
+                                    temp_df = pd.read_csv(row_filepath)
+                                    match_idx = None
+                                    v_id = row.get("video_id")
+                                    if v_id and str(v_id) != 'N/A' and str(v_id) != 'None':
+                                        matches = temp_df[temp_df['Video ID'].astype(str) == str(v_id)]
+                                        if not matches.empty:
+                                            match_idx = matches.index[0]
+                                    
+                                    if match_idx is None:
+                                        t_val = row.get("title")
+                                        c_val = row.get("channel_name")
+                                        matches = temp_df[(temp_df['Video Title'].astype(str) == str(t_val)) & (temp_df['Channel Name'].astype(str) == str(c_val))]
+                                        if not matches.empty:
+                                            match_idx = matches.index[0]
+                                            
+                                    if match_idx is not None:
+                                        row_index_val = f"{match_idx + 2}행"
+                                except Exception as trace_err:
+                                    logger.warning(f"Failed to trace row index in debug: {trace_err}")
+                            
+                            is_channel_type = "채널" in type_tab
+                            if is_channel_type:
+                                v_views = int(row.get("total_views", 0)) if "total_views" in row else 0
+                                v_subscribers = int(parse_count_string(row.get("subscriber_count", "0"))) if "subscriber_count" in row else 0
+                            else:
+                                v_views = int(row.get("views", 0)) if "views" in row else 0
+                                v_likes = int(row.get("likes", 0)) if "likes" in row else 0
+                                v_comments = int(row.get("comments", 0)) if "comments" in row else 0
+                            
+                            item_dict = {
                                 "순위": f"{rank_val}위",
                                 "제목/채널": title_val,
                                 "채널명": ch_val,
-                                "주요수치": metric_val,
-                                "카테고리": row.get("category", "N/A")
-                            })
+                                "참고_파일명": row_file_name,
+                                "참고_행번호": row_index_val,
+                                "카테고리": row_cat
+                            }
+                            if is_channel_type:
+                                item_dict["총조회수"] = v_views
+                                item_dict["구독자수"] = v_subscribers
+                            else:
+                                item_dict["조회수"] = v_views
+                                item_dict["좋아요수"] = v_likes
+                                item_dict["댓글수"] = v_comments
+                                
+                            debug_items.append(item_dict)
                     
                     debug_json_data = {
                         "디버그_실행시간": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

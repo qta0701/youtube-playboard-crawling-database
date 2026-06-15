@@ -57,6 +57,7 @@ class DatabaseHandler:
                 channel_id TEXT,
                 views INTEGER DEFAULT 0,
                 likes INTEGER DEFAULT 0,
+                comments INTEGER DEFAULT 0,
                 rank INTEGER,
                 rank_change TEXT,
                 upload_date TEXT,
@@ -65,9 +66,10 @@ class DatabaseHandler:
                 category TEXT,
                 country TEXT,
                 period TEXT,
+                criteria TEXT,
                 crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(video_id, category, country, period, crawled_at)
+                UNIQUE(video_id, category, country, period, criteria, crawled_at)
             )
         ''')
 
@@ -82,6 +84,7 @@ class DatabaseHandler:
                 channel_id TEXT,
                 views INTEGER DEFAULT 0,
                 likes INTEGER DEFAULT 0,
+                comments INTEGER DEFAULT 0,
                 rank INTEGER,
                 rank_change TEXT,
                 upload_date TEXT,
@@ -90,9 +93,10 @@ class DatabaseHandler:
                 category TEXT,
                 country TEXT,
                 period TEXT,
+                criteria TEXT,
                 crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(video_id, category, country, period, crawled_at)
+                UNIQUE(video_id, category, country, period, criteria, crawled_at)
             )
         ''')
 
@@ -114,9 +118,10 @@ class DatabaseHandler:
                 country TEXT,
                 period TEXT,
                 ranking_type TEXT,
+                criteria TEXT,
                 crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel_id, category, country, period, crawled_at)
+                UNIQUE(channel_id, category, country, period, criteria, crawled_at)
             )
         ''')
 
@@ -398,6 +403,11 @@ class DatabaseHandler:
             
             # 재생목록 ID 연동 마이그레이션 - 원래 행 순서 컬럼 추가
             ('sheet_playlist_ids', 'original_row_order', 'INTEGER'),
+            
+            # 크롤링 랭킹 테이블 수집 기준 컬럼 추가 마이그레이션
+            ('shorts_rank', 'criteria', 'TEXT'),
+            ('videos_rank', 'criteria', 'TEXT'),
+            ('channels_rank', 'criteria', 'TEXT'),
         ]
 
         for table, column, col_type in migrations:
@@ -413,6 +423,30 @@ class DatabaseHandler:
                 logger.warning(f"Migration check/failed for {table}.{column}: {e}", exc_info=True)
 
         self.conn.commit()
+
+        # 기존 NULL 상태인 criteria 값 보정 마이그레이션
+        try:
+            # views > 0 이고 타 지표가 0이면 -> 조회수 순위
+            cursor.execute("UPDATE shorts_rank SET criteria = '조회수 순위' WHERE criteria IS NULL AND views > 0 AND likes = 0 AND comments = 0")
+            cursor.execute("UPDATE videos_rank SET criteria = '조회수 순위' WHERE criteria IS NULL AND views > 0 AND likes = 0 AND comments = 0")
+            
+            # likes > 0 이고 타 지표가 0이면 -> 좋아요 순위
+            cursor.execute("UPDATE shorts_rank SET criteria = '좋아요 순위' WHERE criteria IS NULL AND likes > 0 AND views = 0 AND comments = 0")
+            cursor.execute("UPDATE videos_rank SET criteria = '좋아요 순위' WHERE criteria IS NULL AND likes > 0 AND views = 0 AND comments = 0")
+            
+            # comments > 0 이고 타 지표가 0이면 -> 댓글 순위
+            cursor.execute("UPDATE shorts_rank SET criteria = '댓글 순위' WHERE criteria IS NULL AND comments > 0 AND views = 0 AND likes = 0")
+            cursor.execute("UPDATE videos_rank SET criteria = '댓글 순위' WHERE criteria IS NULL AND comments > 0 AND views = 0 AND likes = 0")
+            
+            # 그 외의 경우 기본값 '조회수 순위'로 지정
+            cursor.execute("UPDATE shorts_rank SET criteria = '조회수 순위' WHERE criteria IS NULL")
+            cursor.execute("UPDATE videos_rank SET criteria = '조회수 순위' WHERE criteria IS NULL")
+            cursor.execute("UPDATE channels_rank SET criteria = '조회수 순위' WHERE criteria IS NULL")
+            
+            self.conn.commit()
+            logger.info("Migration: Initialized legacy criteria columns in database successfully")
+        except Exception as mig_err:
+            logger.warning(f"Failed to migrate legacy criteria values in DB: {mig_err}")
 
     def insert_dataframe(self, df, category, country, period, target_type):
         """
@@ -478,12 +512,14 @@ class DatabaseHandler:
                 else:
                     crawled_at = datetime.now().isoformat()
 
-                # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
+                criteria = row.get('Criteria', row.get('criteria', '조회수 순위'))
+
+                # 중복 체크: 같은 video_id + category + country + period + criteria 존재 시 업데이트
                 cursor.execute('''
                     SELECT id, crawled_at FROM shorts_rank
-                    WHERE video_id = ? AND category = ? AND country = ? AND period = ?
+                    WHERE video_id = ? AND category = ? AND country = ? AND period = ? AND criteria = ?
                     ORDER BY crawled_at DESC LIMIT 1
-                ''', (video_id, category, country, period))
+                ''', (video_id, category, country, period, criteria))
 
                 existing = cursor.fetchone()
 
@@ -493,7 +529,7 @@ class DatabaseHandler:
                         UPDATE shorts_rank SET
                             title = ?, thumbnail_url = ?, channel_name = ?, channel_id = ?,
                             views = ?, likes = ?, comments = ?, rank = ?, rank_change = ?, upload_date = ?,
-                            subscriber_count = ?, tags = ?, updated_at = ?, crawled_at = ?
+                            subscriber_count = ?, tags = ?, criteria = ?, updated_at = ?, crawled_at = ?
                         WHERE id = ?
                     ''', (
                         row.get('Video Title', 'N/A'),
@@ -508,20 +544,21 @@ class DatabaseHandler:
                         row.get('Upload Date', 'N/A'),
                         row.get('Subscribers', ''),
                         row.get('Tags', ''),
+                        criteria,
                         crawled_at,
                         crawled_at,
                         existing['id']
                     ))
-                    logger.debug(f"Updated existing short: {video_id}")
+                    logger.debug(f"Updated existing short: {video_id} ({criteria})")
                 else:
                     # 새 데이터 삽입
                     cursor.execute('''
                         INSERT INTO shorts_rank (
                             video_id, title, thumbnail_url, channel_name, channel_id,
                             views, likes, comments, rank, rank_change, upload_date, subscriber_count, tags,
-                            category, country, period, crawled_at, updated_at
+                            category, country, period, criteria, crawled_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         video_id,
                         row.get('Video Title', 'N/A'),
@@ -539,6 +576,7 @@ class DatabaseHandler:
                         category,
                         country,
                         period,
+                        criteria,
                         crawled_at,
                         crawled_at
                     ))
@@ -584,12 +622,14 @@ class DatabaseHandler:
                 else:
                     crawled_at = datetime.now().isoformat()
 
-                # 중복 체크: 같은 video_id + category + country + period 존재 시 업데이트
+                criteria = row.get('Criteria', row.get('criteria', '조회수 순위'))
+
+                # 중복 체크: 같은 video_id + category + country + period + criteria 존재 시 업데이트
                 cursor.execute('''
                     SELECT id, crawled_at FROM videos_rank
-                    WHERE video_id = ? AND category = ? AND country = ? AND period = ?
+                    WHERE video_id = ? AND category = ? AND country = ? AND period = ? AND criteria = ?
                     ORDER BY crawled_at DESC LIMIT 1
-                ''', (video_id, category, country, period))
+                ''', (video_id, category, country, period, criteria))
 
                 existing = cursor.fetchone()
 
@@ -598,8 +638,8 @@ class DatabaseHandler:
                     cursor.execute('''
                         UPDATE videos_rank SET
                             title = ?, thumbnail_url = ?, channel_name = ?, channel_id = ?,
-                            views = ?, likes = ?, rank = ?, rank_change = ?, upload_date = ?,
-                            subscriber_count = ?, tags = ?, updated_at = ?, crawled_at = ?
+                            views = ?, likes = ?, comments = ?, rank = ?, rank_change = ?, upload_date = ?,
+                            subscriber_count = ?, tags = ?, criteria = ?, updated_at = ?, crawled_at = ?
                         WHERE id = ?
                     ''', (
                         row.get('Video Title', 'N/A'),
@@ -608,25 +648,27 @@ class DatabaseHandler:
                         row.get('Channel ID', 'N/A'),
                         views,
                         likes,
+                        comments,
                         row.get('Rank', 0),
                         row.get('Rank Change', 'N/A'),
                         row.get('Upload Date', 'N/A'),
                         row.get('Subscribers', ''),
                         row.get('Tags', ''),
+                        criteria,
                         crawled_at,
                         crawled_at,
                         existing['id']
                     ))
-                    logger.debug(f"Updated existing video: {video_id}")
+                    logger.debug(f"Updated existing video: {video_id} ({criteria})")
                 else:
                     # 새 데이터 삽입
                     cursor.execute('''
                         INSERT INTO videos_rank (
                             video_id, title, thumbnail_url, channel_name, channel_id,
                             views, likes, comments, rank, rank_change, upload_date, subscriber_count, tags,
-                            category, country, period, crawled_at, updated_at
+                            category, country, period, criteria, crawled_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         video_id,
                         row.get('Video Title', 'N/A'),
@@ -644,10 +686,11 @@ class DatabaseHandler:
                         category,
                         country,
                         period,
+                        criteria,
                         crawled_at,
                         crawled_at
                     ))
-                    logger.debug(f"Inserted new video: {video_id}")
+                    logger.debug(f"Inserted new video: {video_id} ({criteria})")
 
                 count += 1
 
@@ -701,12 +744,14 @@ class DatabaseHandler:
                 else:
                     crawled_at = datetime.now().isoformat()
 
-                # 중복 체크: 같은 channel_id + category + country + period + ranking_type 존재 시 업데이트
+                criteria = row.get('Criteria', row.get('criteria', '조회수 순위'))
+
+                # 중복 체크: 같은 channel_id + category + country + period + ranking_type + criteria 존재 시 업데이트
                 cursor.execute('''
                     SELECT id, crawled_at FROM channels_rank
-                    WHERE channel_id = ? AND category = ? AND country = ? AND period = ? AND ranking_type = ?
+                    WHERE channel_id = ? AND category = ? AND country = ? AND period = ? AND ranking_type = ? AND criteria = ?
                     ORDER BY crawled_at DESC LIMIT 1
-                ''', (channel_id, category, country, period, ranking_type))
+                ''', (channel_id, category, country, period, ranking_type, criteria))
 
                 existing = cursor.fetchone()
 
@@ -717,7 +762,7 @@ class DatabaseHandler:
                             channel_name = ?, profile_url = ?, channel_url = ?,
                             rank = ?, rank_change = ?,
                             subscriber_count = ?, total_views = ?, video_count = ?, tags = ?,
-                            updated_at = ?, crawled_at = ?
+                            criteria = ?, updated_at = ?, crawled_at = ?
                         WHERE id = ?
                     ''', (
                         row.get('Channel Name', 'N/A'),
@@ -729,11 +774,12 @@ class DatabaseHandler:
                         score_2,
                         video_count,
                         row.get('Tags', ''),
+                        criteria,
                         crawled_at,
                         crawled_at,
                         existing['id']
                     ))
-                    logger.debug(f"Updated existing channel: {channel_id}")
+                    logger.debug(f"Updated existing channel: {channel_id} ({criteria})")
                 else:
                     # 새 데이터 삽입
                     cursor.execute('''
@@ -741,9 +787,9 @@ class DatabaseHandler:
                             channel_id, channel_name, profile_url, channel_url,
                             rank, rank_change,
                             subscriber_count, total_views, video_count, tags,
-                            category, country, period, ranking_type, crawled_at, updated_at
+                            category, country, period, ranking_type, criteria, crawled_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         channel_id,
                         row.get('Channel Name', 'N/A'),
@@ -759,10 +805,11 @@ class DatabaseHandler:
                         country,
                         period,
                         ranking_type,
+                        criteria,
                         crawled_at,
                         crawled_at
                     ))
-                    logger.debug(f"Inserted new channel: {channel_id}")
+                    logger.debug(f"Inserted new channel: {channel_id} ({criteria})")
 
                 count += 1
 
