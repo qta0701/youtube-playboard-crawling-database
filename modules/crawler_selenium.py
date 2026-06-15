@@ -547,7 +547,8 @@ class PlayboardCrawler:
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
                         self.random_delay(0.5, 1.0)
                         search_input.clear()
-                        search_input.send_keys(category)
+                        search_term = category.split('/')[0] if '/' in category else category
+                        search_input.send_keys(search_term)
                         self.random_delay(0.5, 1.0)
                         search_input.send_keys(Keys.ENTER)
                         self.random_delay(1.5, 2.5)
@@ -1277,9 +1278,14 @@ class PlayboardCrawler:
 
             # 데이터 품질 체크 (필수 필드 기준)
             if target_type != 'channel':
-                valid_items = sum(1 for item in data if item.get('Video Title') != 'N/A' and item.get('Views', 0) > 0)
+                metric_col = 'Views'
+                if ranking_criteria == '좋아요 순위':
+                    metric_col = 'Likes'
+                elif ranking_criteria == '댓글 순위':
+                    metric_col = 'Comments'
+                valid_items = sum(1 for item in data if item.get('Video Title') != 'N/A' and item.get(metric_col, 0) > 0)
                 data_quality = (valid_items / len(data) * 100) if data else 0
-                logger.info(f"  Valid Items      : {valid_items} (Title + Views 존재)")
+                logger.info(f"  Valid Items      : {valid_items} (Title + {metric_col} 존재)")
                 logger.info(f"  Data Quality     : {data_quality:.1f}%")
 
             # 중단 사유 판단
@@ -1536,7 +1542,10 @@ class PlayboardCrawler:
                     'Criteria': ranking_criteria,
                     'Period': period,
                     'Ranking Date': ranking_date,
-                    'Type': video_type
+                    'Type': video_type,
+                    'Views': 0,
+                    'Likes': 0,
+                    'Comments': 0
                 }
                 item_dict[metric_col] = views
                 data.append(item_dict)
@@ -1554,7 +1563,8 @@ class PlayboardCrawler:
             logger.info("=" * 50)
             logger.info(f"=== {video_type.upper()} Crawling Summary (First 4 Items) ===")
             for item in data[:4]:
-                logger.info(f"#{item['Rank']} ({item['Rank Change']}) | {item['Video Title'][:30]}... | {item['Views']:,} views")
+                metric_val = item.get(metric_col, 0)
+                logger.info(f"#{item['Rank']} ({item['Rank Change']}) | {item['Video Title'][:30]}... | {metric_val:,} {metric_col.lower()}")
             logger.info("=" * 50)
 
         return data

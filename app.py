@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import streamlit.components.v1 as components
 import json
 import sqlite3
 import logging
@@ -2118,63 +2119,251 @@ with tabs[1]:
                         font-weight: bold !important;
                         color: #ffffff !important;
                     }
+                    /* 복사 모달 팝업 스타일 */
+                    .copy-modal-overlay {
+                        display: none;
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.7);
+                        backdrop-filter: blur(5px);
+                        z-index: 999999;
+                        align-items: center;
+                        justify-content: center;
+                        opacity: 0;
+                        transition: opacity 0.2s ease;
+                    }
+                    .copy-modal-overlay.active {
+                        display: flex;
+                        opacity: 1;
+                    }
+                    .copy-modal {
+                        background: #1e1e24;
+                        border: 1px solid #3d3d44;
+                        border-radius: 12px;
+                        width: 90%;
+                        max-width: 600px;
+                        padding: 24px;
+                        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                        color: #ffffff;
+                        position: relative;
+                        transform: scale(0.95);
+                        transition: transform 0.2s ease;
+                    }
+                    .copy-modal-overlay.active .copy-modal {
+                        transform: scale(1);
+                    }
+                    .copy-modal-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 20px;
+                        border-bottom: 1px solid #2d2d34;
+                        padding-bottom: 12px;
+                    }
+                    .copy-modal-title {
+                        font-size: 1.3em;
+                        font-weight: bold;
+                        color: #ffffff;
+                    }
+                    .copy-modal-close {
+                        cursor: pointer;
+                        background: none;
+                        border: none;
+                        color: #a0a0a5;
+                        font-size: 1.5em;
+                        padding: 0;
+                        line-height: 1;
+                    }
+                    .copy-modal-close:hover {
+                        color: #ffffff;
+                    }
+                    .copy-modal-body {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 16px;
+                    }
+                    .copy-item-label {
+                        font-size: 0.95em;
+                        font-weight: bold;
+                        color: #a0a0a5;
+                        margin-bottom: 6px;
+                    }
+                    .copy-code-container {
+                        position: relative;
+                        background-color: #0f1115;
+                        border: 1px solid #2d3139;
+                        border-radius: 6px;
+                        padding: 12px;
+                        padding-right: 80px;
+                        font-family: Source Code Pro, Consolas, Monaco, monospace;
+                        font-size: 0.95em;
+                        color: #e6e6e6;
+                        word-break: break-all;
+                        min-height: 45px;
+                        display: flex;
+                        align-items: center;
+                    }
+                    .copy-code-btn {
+                        position: absolute;
+                        top: 6px;
+                        right: 6px;
+                        background-color: #1a1c23;
+                        border: 1px solid #2d3139;
+                        color: #a0a0a5;
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        font-size: 0.85em;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        font-family: sans-serif;
+                    }
+                    .copy-code-btn:hover {
+                        background-color: #2d3139;
+                        color: #ffffff;
+                    }
+                    .copy-code-btn.copied {
+                        background-color: #2ea44f;
+                        color: #ffffff;
+                        border-color: #2ea44f;
+                    }
                     </style>
-                    
-                    <script>
-                    function performCopy(text) {
-                        if (navigator.clipboard && window.isSecureContext) {
-                            navigator.clipboard.writeText(text).then(function() {
-                                alert("📋 클립보드에 복사되었습니다:\n" + text);
-                            }).catch(function(err) {
-                                fallbackCopy(text);
-                            });
-                        } else {
-                            fallbackCopy(text);
-                        }
-                    }
 
-                    function fallbackCopy(text) {
-                        var textArea = document.createElement("textarea");
-                        textArea.value = text;
-                        textArea.style.position = "fixed";
-                        textArea.style.left = "-999999px";
-                        textArea.style.top = "-999999px";
-                        document.body.appendChild(textArea);
-                        textArea.focus();
-                        textArea.select();
-                        try {
-                            var successful = document.execCommand('copy');
-                            if (successful) {
-                                alert("📋 클립보드에 복사되었습니다:\n" + text);
-                            } else {
-                                alert("❌ 복사 실패 (브라우저 제한)");
-                            }
-                        } catch (err) {
-                            console.error('fallback 복사 에러:', err);
-                            alert("❌ 복사 실패: " + err);
-                        }
-                        document.body.removeChild(textArea);
-                    }
-
-                    // 전역 및 부모 창에 바인딩하여 iframe 샌드박스 우회
-                    window.copyToClipboard = performCopy;
-                    if (window.parent) {
-                        window.parent.copyToClipboard = performCopy;
-                    }
-
-                    // Streamlit HTML Sanitizer 우회용 이벤트 리스너 바인딩
-                    document.addEventListener('click', function(e) {
-                        var copyTarget = e.target.closest('[title="클릭 시 복사"]');
-                        if (copyTarget) {
-                            var text = copyTarget.getAttribute('data-copy-text');
-                            if (text && window.copyToClipboard) {
-                                window.copyToClipboard(text);
-                                e.preventDefault();
-                            }
-                        }
-                    });
-                    </script>
+                    <!-- 복사 모달 HTML 마크업 -->
+                    <div id="copyModalOverlay" class="copy-modal-overlay">
+                        <div class="copy-modal">
+                            <div class="copy-modal-header">
+                                <span class="copy-modal-title">📋 제목 / 채널명 복사</span>
+                                <button class="copy-modal-close" onclick="window.closeCopyModal()">&times;</button>
+                            </div>
+                            <div class="copy-modal-body">
+                                <div>
+                                    <div class="copy-item-label">영상 제목 (Video Title)</div>
+                                    <div class="copy-code-container">
+                                        <span id="copyModalTitleText"></span>
+                                        <button class="copy-code-btn" onclick="window.copyModalField('copyModalTitleText', this)">복사 📋</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="copy-item-label">채널명 (Channel Name)</div>
+                                    <div class="copy-code-container">
+                                        <span id="copyModalChannelText"></span>
+                                        <button class="copy-code-btn" onclick="window.copyModalField('copyModalChannelText', this)">복사 📋</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 """)
+                
+                # Iframe 샌드박스를 우회하여 부모 페이지에 이벤트 리스너를 바인딩하는 JS 컴포넌트 실행 (React 렌더링 무시 극복)
+                components.html("""
+                    <script>
+                    const parentDoc = window.parent.document;
+                    
+                    // 중복 등록 방지 처리를 통해 Streamlit 갱신 시 리스너 누수 방지
+                    if (!window.parent.copyModalWired) {
+                        window.parent.copyModalWired = true;
+                        
+                        parentDoc.addEventListener('click', function(e) {
+                            // 1. 카드 클릭 감지 (캐러셀 카드 및 리스트 카드 공통 대응)
+                            const card = e.target.closest('.dashboard-card, .list-card');
+                            if (card) {
+                                let title = '';
+                                let channel = '';
+                                
+                                if (card.classList.contains('dashboard-card')) {
+                                    const titleEl = card.querySelector('.card-title');
+                                    const channelEl = card.querySelector('.card-channel-name');
+                                    title = titleEl ? titleEl.textContent.trim() : '';
+                                    channel = channelEl ? channelEl.textContent.replace('👤', '').trim() : '';
+                                } else if (card.classList.contains('list-card')) {
+                                    const titleEl = card.querySelector('.list-title');
+                                    const channelEl = card.querySelector('.list-channel-name');
+                                    title = titleEl ? titleEl.textContent.trim() : '';
+                                    channel = channelEl ? channelEl.textContent.replace('👤 채널명:', '').replace('👤', '').trim() : '';
+                                }
+                                
+                                const overlay = parentDoc.getElementById('copyModalOverlay');
+                                const titleText = parentDoc.getElementById('copyModalTitleText');
+                                const channelText = parentDoc.getElementById('copyModalChannelText');
+                                
+                                if (overlay && titleText && channelText) {
+                                    titleText.textContent = title;
+                                    channelText.textContent = channel;
+                                    
+                                    // 복사 버튼 상태 초기화
+                                    const copyBtns = overlay.querySelectorAll('.copy-code-btn');
+                                    copyBtns.forEach(btn => {
+                                        btn.textContent = '복사 📋';
+                                        btn.style.background = '';
+                                        btn.style.color = '';
+                                    });
+                                    
+                                    overlay.style.display = 'flex';
+                                    overlay.offsetHeight; // Reflow 강제 실행으로 transition 애니메이션 작동 보장
+                                    overlay.style.opacity = '1';
+                                }
+                                return;
+                            }
+                            
+                            // 2. 모달 닫기 클릭 감지 (X 버튼 또는 바깥 배경 레이어 클릭 시)
+                            if (e.target.classList.contains('copy-modal-close') || e.target.id === 'copyModalOverlay') {
+                                const overlay = parentDoc.getElementById('copyModalOverlay');
+                                if (overlay) {
+                                    overlay.style.opacity = '0';
+                                    setTimeout(() => {
+                                        overlay.style.display = 'none';
+                                    }, 200);
+                                }
+                                return;
+                            }
+                            
+                            // 3. 개별 항목 복사 버튼 클릭 감지
+                            if (e.target.classList.contains('copy-code-btn')) {
+                                const textSpan = e.target.previousElementSibling;
+                                if (textSpan) {
+                                    const textToCopy = textSpan.textContent;
+                                    
+                                    // 기본 복사 API 시도
+                                    navigator.clipboard.writeText(textToCopy).then(() => {
+                                        const originalText = e.target.textContent;
+                                        e.target.textContent = '완료 ✓';
+                                        e.target.style.background = '#2ea44f';
+                                        e.target.style.color = 'white';
+                                        setTimeout(() => {
+                                            e.target.textContent = originalText;
+                                            e.target.style.background = '';
+                                            e.target.style.color = '';
+                                        }, 1500);
+                                    }).catch(err => {
+                                        // 복사 차단 환경 대비 폴백(Fallback) 텍스트 복사 방식
+                                        const textarea = parentDoc.createElement('textarea');
+                                        textarea.value = textToCopy;
+                                        parentDoc.body.appendChild(textarea);
+                                        textarea.select();
+                                        try {
+                                            parentDoc.execCommand('copy');
+                                            e.target.textContent = '완료 ✓';
+                                            e.target.style.background = '#2ea44f';
+                                            e.target.style.color = 'white';
+                                            setTimeout(() => {
+                                                e.target.textContent = '복사 📋';
+                                                e.target.style.background = '';
+                                                e.target.style.color = '';
+                                            }, 1500);
+                                        } catch (e2) {}
+                                        parentDoc.body.removeChild(textarea);
+                                    });
+                                }
+                                return;
+                            }
+                        });
+                    }
+                    </script>
+                """, height=0)
                 
                 # JS 안전 문자열 정제 헬퍼 함수
                 def clean_js_text(text):
@@ -2275,26 +2464,25 @@ with tabs[1]:
                                     else:
                                         sub_text = str(sub_val)
                                     
-                                    safe_sub = clean_js_text(sub_text)
-                                    sub_html = f'<div style="margin-top: 4px;"><span class="list-subscribers" style="color: #ffffff; font-size: 1.1em; cursor: pointer;" title="클릭 시 복사" data-copy-text="{safe_sub}" onclick="window.copyToClipboard(\'{safe_sub}\')">👥 구독자수: {sub_text}</span></div>'
+                                    sub_html = f'<div style="margin-top: 4px;"><span class="list-subscribers" style="color: #ffffff; font-size: 1.1em;">👥 구독자수: {sub_text}</span></div>'
                             
                             sort_rank_html = ""
                             if show_sort_rank:
                                 sort_rank_html = f"<span style='background-color: #007bff; color: white; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🔄 정렬순위: {idx + 1}위</span>"
 
                             list_content = f"""
-                            <div class="list-card">
+                            <div class="list-card" onclick="window.openCopyModal('{safe_title}', '{safe_channel}')" style="cursor: pointer;" title="클릭 시 제목/채널명 복사 팝업 표시">
                                 <span class="list-badge">{rank}위 ({rc_display})</span>
                                 <div class="list-thumbnail-container">
                                     <img src="{img_url}" class="list-thumbnail" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
                                 </div>
                                 <div class="list-content">
-                                    <div class="list-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
+                                    <div class="list-title">{title}</div>
                                     <div class="list-info">
                                         <div style="margin-bottom: 4px;">
                                             <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🏷️ {clean_cat}</span>
                                             {sort_rank_html}
-                                            <span class="list-channel-name" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 채널명: {channel_name}</span>
+                                            <span class="list-channel-name">👤 채널명: {channel_name}</span>
                                         </div>
                                         {sub_html}
                                         <div style="margin-top: 4px;">
@@ -2389,8 +2577,7 @@ with tabs[1]:
                                         else:
                                             sub_text = str(sub_val)
                                         
-                                        safe_sub = clean_js_text(sub_text)
-                                        sub_html = f'<div class="card-info card-subscribers" style="color: #ffffff; font-size: 1.1em; margin-bottom: 5px; cursor: pointer;" title="클릭 시 복사" data-copy-text="{safe_sub}" onclick="window.copyToClipboard(\'{safe_sub}\')">👥 구독자수: {sub_text}</div>'
+                                        sub_html = f'<div class="card-info card-subscribers" style="color: #ffffff; font-size: 1.1em; margin-bottom: 5px;">👥 구독자수: {sub_text}</div>'
                                 
                                 # 콘텐츠 구분(type_tab)에 따라 최적의 썸네일 이미지 스타일 결정
                                 img_style = "width:100%; border-radius:8px; object-fit:cover; margin-bottom:8px;"
@@ -2406,13 +2593,13 @@ with tabs[1]:
                                     sort_rank_html = f"<span style='background-color: #007bff; color: white; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🔄 정렬순위: {idx + 1}위</span>"
 
                                 card_content = f"""
-                                <div class="dashboard-card">
+                                <div class="dashboard-card" onclick="window.openCopyModal('{safe_title}', '{safe_channel}')" style="cursor: pointer;" title="클릭 시 제목/채널명 복사 팝업 표시">
                                     <span class="rank-badge">{rank}위 ({rc_display})</span>
                                     <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; display: inline-block; vertical-align: middle; margin-bottom: 5px;'>🏷️ {clean_cat}</span>
                                     {sort_rank_html}
                                     <img src="{img_url}" style="{img_style}" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
-                                    <div class="card-title" title="클릭 시 복사" data-copy-text="{safe_title}" onclick="window.copyToClipboard('{safe_title}')">{title}</div>
-                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:2px;" title="클릭 시 복사" data-copy-text="{safe_channel}" onclick="window.copyToClipboard('{safe_channel}')">👤 {channel_name}</div>
+                                    <div class="card-title">{title}</div>
+                                    <div class="card-info card-channel-name" style="font-weight:bold; margin-bottom:2px;">👤 {channel_name}</div>
                                     {sub_html}
                                     {metric_html}
                                 </div>
