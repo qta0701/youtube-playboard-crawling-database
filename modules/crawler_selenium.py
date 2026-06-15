@@ -427,6 +427,143 @@ class PlayboardCrawler:
         except Exception as date_err:
             logger.warning(f"⚠ [Date Selection] 날짜 요소 처리 중 예외 발생: {date_err}")
 
+    def _check_error_page(self):
+        """
+        "페이지를 찾을 수 없습니다" 등의 에러 페이지 상태인지 정밀 감지합니다.
+        """
+        try:
+            # common-error 컨테이너 또는 에러 메시지가 있는지 확인
+            error_indicators = [
+                "div.common-error",
+                "//div[contains(@class, 'common-error')]",
+                "//a[contains(@class, 'tbtn') and contains(text(), '홈 화면으로 가기')]",
+                "//div[contains(@class, 'message') and contains(text(), '페이지를 찾을 수 없습니다')]"
+            ]
+            for indicator in error_indicators:
+                try:
+                    if indicator.startswith("//"):
+                        el = self.driver.find_elements(By.XPATH, indicator)
+                    else:
+                        el = self.driver.find_elements(By.CSS_SELECTOR, indicator)
+                    if el and any(e.is_displayed() for e in el):
+                        logger.debug(f"[Error Page Check] Error indicator found: {indicator}")
+                        return True
+                except:
+                    continue
+            return False
+        except Exception as e:
+            logger.debug(f"Error page check failed: {e}")
+            return False
+
+    def _apply_ui_filters(self, category, country, period):
+        """
+        기본 차트 페이지 등에서 카테고리, 국가, 기간 필터를 UI 클릭을 통해 선택합니다.
+        """
+        logger.info(f"[UI Filter] 필터 수동 세팅 시작 - 카테고리: {category}, 국가: {country}, 기간: {period}")
+        
+        # 1. 국가 (Country) 선택
+        if country:
+            try:
+                # 이미 국가가 선택되어 있는지 확인
+                selected_xpath = f"//div[contains(@class, 'grid--country')]//li[contains(@class, 'item') and contains(@class, 'item--selected')][.//span[@class='item__label' and normalize-space()='{country}']]"
+                if self.driver.find_elements(By.XPATH, selected_xpath):
+                    logger.info(f"[UI Filter] 국가 '{country}'는 이미 선택되어 있습니다.")
+                else:
+                    target_xpath = f"//div[contains(@class, 'grid--country')]//li[contains(@class, 'item')][.//span[@class='item__label' and normalize-space()='{country}']]"
+                    # 요소를 찾아서 스크롤 및 클릭
+                    elements = self.driver.find_elements(By.XPATH, target_xpath)
+                    if elements:
+                        item = elements[0]
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", item)
+                        self.random_delay(0.5, 1.0)
+                        self.driver.execute_script("arguments[0].click();", item)
+                        logger.info(f"✓ [UI Filter] 국가 클릭 선택 완료: {country}")
+                        self.random_delay(1.5, 2.5)
+                    else:
+                        # 국가 목록에 바로 없을 경우 검색 폴백
+                        logger.info(f"[UI Filter] 국가 '{country}' 요소를 리스트에서 찾지 못해 검색을 시도합니다.")
+                        search_input = self.driver.find_element(By.CSS_SELECTOR, "div.grid--country input.search__input")
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
+                        self.random_delay(0.5, 1.0)
+                        search_input.clear()
+                        search_input.send_keys(country)
+                        self.random_delay(0.5, 1.0)
+                        search_input.send_keys(Keys.ENTER)
+                        self.random_delay(1.5, 2.5)
+                        # 검색 결과에서 클릭
+                        elements = self.driver.find_elements(By.XPATH, target_xpath)
+                        if elements:
+                            self.driver.execute_script("arguments[0].click();", elements[0])
+                            logger.info(f"✓ [UI Filter] 국가 검색 후 클릭 선택 완료: {country}")
+                            self.random_delay(1.5, 2.5)
+                        else:
+                            logger.warning(f"⚠ [UI Filter] 국가 '{country}' 검색 후에도 요소를 선택하지 못했습니다.")
+            except Exception as e:
+                logger.warning(f"⚠ [UI Filter] 국가 선택 중 예외 발생: {e}")
+
+        # 2. 기간 (Period) 선택
+        if period:
+            try:
+                # 이미 기간이 선택되어 있는지 확인
+                selected_xpath = f"//div[contains(@class, 'grid')][.//h3[contains(text(), '기간')]]//li[contains(@class, 'item') and contains(@class, 'item--selected')][.//span[@class='item__label' and normalize-space()='{period}']]"
+                if self.driver.find_elements(By.XPATH, selected_xpath):
+                    logger.info(f"[UI Filter] 기간 '{period}'은 이미 선택되어 있습니다.")
+                else:
+                    target_xpath = f"//div[contains(@class, 'grid')][.//h3[contains(text(), '기간')]]//li[contains(@class, 'item')][.//span[@class='item__label' and normalize-space()='{period}']]"
+                    elements = self.driver.find_elements(By.XPATH, target_xpath)
+                    if elements:
+                        item = elements[0]
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", item)
+                        self.random_delay(0.5, 1.0)
+                        self.driver.execute_script("arguments[0].click();", item)
+                        logger.info(f"✓ [UI Filter] 기간 클릭 선택 완료: {period}")
+                        self.random_delay(1.5, 2.5)
+                    else:
+                        logger.warning(f"⚠ [UI Filter] 기간 '{period}' 요소를 찾지 못했습니다.")
+            except Exception as e:
+                logger.warning(f"⚠ [UI Filter] 기간 선택 중 예외 발생: {e}")
+
+        # 3. 카테고리 (Category) 선택
+        if category:
+            try:
+                # 이미 카테고리가 선택되어 있는지 확인
+                selected_xpath = f"//div[contains(@class, 'grid--group')]//li[contains(@class, 'item') and contains(@class, 'item--selected')][.//span[@class='item__label' and normalize-space()='{category}']]"
+                if self.driver.find_elements(By.XPATH, selected_xpath):
+                    logger.info(f"[UI Filter] 카테고리 '{category}'는 이미 선택되어 있습니다.")
+                else:
+                    target_xpath = f"//div[contains(@class, 'grid--group')]//li[contains(@class, 'item')][.//span[@class='item__label' and normalize-space()='{category}']]"
+                    elements = self.driver.find_elements(By.XPATH, target_xpath)
+                    if elements:
+                        item = elements[0]
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", item)
+                        self.random_delay(0.5, 1.0)
+                        self.driver.execute_script("arguments[0].click();", item)
+                        logger.info(f"✓ [UI Filter] 카테고리 클릭 선택 완료: {category}")
+                        self.random_delay(1.5, 2.5)
+                    else:
+                        # 카테고리 목록에 바로 없을 경우 검색 폴백
+                        logger.info(f"[UI Filter] 카테고리 '{category}' 요소를 리스트에서 찾지 못해 검색을 시도합니다.")
+                        search_input = self.driver.find_element(By.CSS_SELECTOR, "div.grid--group input.search__input")
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
+                        self.random_delay(0.5, 1.0)
+                        search_input.clear()
+                        search_input.send_keys(category)
+                        self.random_delay(0.5, 1.0)
+                        search_input.send_keys(Keys.ENTER)
+                        self.random_delay(1.5, 2.5)
+                        # 검색 결과에서 클릭
+                        elements = self.driver.find_elements(By.XPATH, target_xpath)
+                        if elements:
+                            self.driver.execute_script("arguments[0].click();", elements[0])
+                            logger.info(f"✓ [UI Filter] 카테고리 검색 후 클릭 선택 완료: {category}")
+                            self.random_delay(1.5, 2.5)
+                        else:
+                            logger.warning(f"⚠ [UI Filter] 카테고리 '{category}' 검색 후에도 요소를 선택하지 못했습니다.")
+            except Exception as e:
+                logger.warning(f"⚠ [UI Filter] 카테고리 선택 중 예외 발생: {e}")
+
+        logger.info("[UI Filter] 필터 수동 세팅 완료")
+
     def _check_login_wall(self):
         """
         [PLAN.md Phase 2.2] 로그인 월(Login Wall) 정밀 감지
@@ -1054,6 +1191,31 @@ class PlayboardCrawler:
                 if self.stop_requested:
                     return pd.DataFrame()
                 time.sleep(0.5)
+
+            # [수정] 에러 페이지(404) 감지 시 기본 주소 우회 및 UI 필터 세팅
+            if self._check_error_page():
+                logger.warning("⚠ [404 Error] 페이지를 찾을 수 없습니다 감지! 기본 차트 주소로 우회하여 UI 필터 선택을 시도합니다.")
+                
+                # target_type에 따른 기본 주소 설정
+                fallback_url = "https://playboard.co/chart/short/"
+                if target_type == 'video':
+                    fallback_url = "https://playboard.co/chart/video/"
+                elif target_type == 'channel':
+                    fallback_url = "https://playboard.co/youtube-ranking/"
+                
+                logger.info(f"이동 중 (Fallback URL): {fallback_url}")
+                try:
+                    self.driver.get(fallback_url)
+                except Exception as get_err:
+                    logger.error(f"Failed to navigate to fallback URL {fallback_url}: {get_err}")
+                
+                for _ in range(6):
+                    if self.stop_requested:
+                        return pd.DataFrame()
+                    time.sleep(0.5)
+                
+                # UI 필터 클릭 선택 적용 (카테고리, 국가, 기간)
+                self._apply_ui_filters(category, country, period)
 
             if login_mode:
                 self._wait_for_login()

@@ -876,7 +876,7 @@ with tabs[0]:
                 logger.info("=" * 60)
                 
                 timestamp = None
-                if specific_date:
+                if use_specific_date and specific_date:
                     dt = datetime.strptime(specific_date, '%Y-%m-%d')
                     timestamp = int(dt.timestamp())
                 
