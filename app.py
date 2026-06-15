@@ -30,6 +30,10 @@ from modules.utils import play_notification_sound, show_notification
 from logger_config import setup_logger, cleanup_old_logs
 logger = setup_logger('crawler')
 
+# 공통 유틸 및 크롤러 기동 엔진 임포트
+from app_utils import get_actual_ranking_date_str, standardize_dataframe_types, load_and_standardize_csv
+from modules.crawler_runner import run_crawling_by_criteria, find_existing_batch_file_runner
+
 # Streamlit 페이지 설정 (프리미엄 테마 적용)
 st.set_page_config(
     page_title="유튜브 대시보드 크롤러",
@@ -131,213 +135,6 @@ def get_db_connection():
     return conn
 
 
-def get_actual_ranking_date_str(specific_date_str):
-    """선택한 수집 날짜 기준 1일 전 날짜를 계산해 실제 플레이보드 랭킹 날짜로 매칭시킵니다."""
-    try:
-        from datetime import datetime, timedelta
-        dt = datetime.strptime(specific_date_str, "%Y-%m-%d") - timedelta(days=1)
-        return dt.strftime("%Y-%m-%d")
-    except:
-        return specific_date_str
-
-
-# ==============================================================================
-# Helper: 기존 오늘 날짜의 중간 수집 파일 검색
-# ==============================================================================
-def find_existing_batch_file(base_dir, target_type, category, country, period, criteria=None, ranking_date=None):
-    """지정된 랭킹 날짜 폴더 내에 이미 수집된 특정 조건의 최신 CSV 파일 경로를 탐색합니다. (정규식 기반 윈도우 호환성 보장)"""
-    import re
-    if ranking_date:
-        try:
-            # YYYY-MM-DD 또는 YYYY/MM/DD 등의 포맷을 YYYY_MM_DD로 치환
-            clean_date = ranking_date.replace('-', '_').replace('/', '_')
-            if re.match(r'^\d{4}_\d{2}_\d{2}$', clean_date):
-                date_folder = clean_date
-            else:
-                date_folder = datetime.now().strftime('%Y_%m_%d')
-        except Exception as e:
-            logger.warning(f"Failed to parse ranking_date {ranking_date}: {e}")
-            date_folder = datetime.now().strftime('%Y_%m_%d')
-    else:
-        date_folder = datetime.now().strftime('%Y_%m_%d')
-    
-    if 'shorts' in target_type.lower():
-        type_folder = 'Shorts'
-    elif 'channel' in target_type.lower():
-        type_folder = 'Channel'
-    elif 'video' in target_type.lower():
-        type_folder = 'Video'
-    else:
-        type_folder = 'Others'
-        
-    target_dir = os.path.join(base_dir, date_folder, type_folder)
-    if not os.path.exists(target_dir):
-        return None
-        
-    safe_target = sanitize_filename(target_type)
-    safe_category = sanitize_filename(category)
-    safe_country = sanitize_filename(country)
-    safe_period = sanitize_filename(period)
-    safe_criteria = sanitize_filename(criteria) if criteria else None
-    
-    try:
-        files = os.listdir(target_dir)
-    except Exception as e:
-        logger.warning(f"Failed to list directory {target_dir}: {e}")
-        return None
-        
-    matching_files = []
-    pure_category = safe_category.replace('batch_', '')
-    
-    # 정규식 패턴: 
-    # criteria가 명시된 경우: {target}_{optional batch_}{category}_{country}_{period}_{criteria}_*.csv
-    # criteria가 없는 경우: {target}_{optional batch_}{category}_{country}_{period}_*.csv (하위 호환성)
-    # 하위 호환성 추가: criteria가 '조회수 순위'인 경우, 파일명에 criteria가 생략된 기존 파일도 매칭할 수 있도록 합니다.
-    if safe_criteria:
-        if safe_criteria in ['조회수 순위', '조회수_순위', '조회수']:
-            pattern_regex = re.compile(
-                rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_(?:{re.escape(safe_criteria)}_)?.+\.csv$",
-                re.IGNORECASE
-            )
-        else:
-            pattern_regex = re.compile(
-                rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_{re.escape(safe_criteria)}_.+\.csv$",
-                re.IGNORECASE
-            )
-    else:
-        pattern_regex = re.compile(
-            rf"^{re.escape(safe_target)}_(?:batch_)?{re.escape(pure_category)}_{re.escape(safe_country)}_{re.escape(safe_period)}_.+\.csv$",
-            re.IGNORECASE
-        )
-    
-    for f in files:
-        if pattern_regex.match(f):
-            full_path = os.path.join(target_dir, f)
-            matching_files.append(full_path)
-            
-    if not matching_files:
-        return None
-        
-    matching_files.sort(key=os.path.getmtime, reverse=True)
-    return matching_files[0]
-
-
-def standardize_dataframe_types(df, target_criteria):
-    """
-    데이터프레임의 모든 컬럼에 대해 데이터타입과 데이터 포맷을 표준 형식으로 강제 캐스팅하여
-    기존 파일 데이터와 신규 수집 데이터 간의 불일치를 해소합니다.
-    """
-    if df is None or df.empty:
-        return pd.DataFrame()
-        
-    df = df.copy()
-    
-    # 수치형 컬럼 표준화 (Rank, Views, Likes, Comments)
-    numeric_cols = ['Rank', 'Views', 'Likes', 'Comments']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int64')
-            
-    # 문자열형 컬럼 표준화 (결측값은 'N/A' 또는 빈값으로 대체)
-    string_cols = [
-        'Period', 'Ranking Date', 'Type', 'Country', 'Category', 'Criteria', 'Rank Change',
-        'Video Title', 'Upload Date', 'Tags', 'Channel Name', 'Subscribers', 'Thumbnail', 'Video ID'
-    ]
-    for col in string_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna('N/A').astype(str).str.strip()
-            
-    return df
-
-
-def load_and_standardize_csv(filepath, target_criteria):
-    """
-    기존 CSV 파일을 읽어와 표준 스키마(Criteria 및 수집 기준에 부합하는 수치 컬럼)로 자동 정합 및 보정합니다.
-    구버전 형식 감지 시 최신 표준 컬럼 순서 및 구성으로 덮어써서 마이그레이션을 자동 수행합니다.
-    """
-    import pandas as pd
-    try:
-        raw_df = pd.read_csv(filepath)
-    except Exception as e:
-        logger.warning(f"CSV load failed: {filepath}, error: {e}")
-        return pd.DataFrame()
-
-    if raw_df.empty:
-        return raw_df
-
-    original_cols = list(raw_df.columns)
-    df = raw_df.copy()
-
-    # 1. 수집 기준(Criteria) 컬럼 보완
-    if 'Criteria' not in df.columns:
-        df['Criteria'] = None
-    
-    # 2. 기존 수치 컬럼 분석을 통한 수집 기준(Criteria) 값 채우기
-    detected_criteria = None
-    if 'Views' in df.columns and df['Views'].notna().any():
-        detected_criteria = '조회수 순위'
-    elif 'Likes' in df.columns and df['Likes'].notna().any():
-        detected_criteria = '좋아요 순위'
-    elif 'Comments' in df.columns and df['Comments'].notna().any():
-        detected_criteria = '댓글 순위'
-    
-    if not detected_criteria:
-        detected_criteria = target_criteria if target_criteria else '조회수 순위'
-        
-    df['Criteria'] = df['Criteria'].fillna(detected_criteria)
-
-    # 3. 현재 타겟 수집 기준에 상응하는 수치 컬럼 지정
-    target_metric_col = 'Views'
-    if target_criteria == '좋아요 순위':
-        target_metric_col = 'Likes'
-    elif target_criteria == '댓글 순위':
-        target_metric_col = 'Comments'
-
-    # 기존 파일에서 데이터가 들어있는 수치 컬럼 검색
-    source_metric_col = None
-    for col in ['Views', 'Likes', 'Comments']:
-        if col in df.columns and df[col].notna().any():
-            source_metric_col = col
-            break
-
-    # 수치 데이터 매핑 및 이전 컬럼 제거
-    if source_metric_col and source_metric_col != target_metric_col:
-        df[target_metric_col] = df[source_metric_col]
-        if source_metric_col in df.columns:
-            df.drop(columns=[source_metric_col], inplace=True)
-
-    # 타겟 수치 컬럼이 존재하지 않으면 기본값 채움
-    if target_metric_col not in df.columns:
-        df[target_metric_col] = 0
-
-    # 4. 표준 스키마 구성 정의
-    standard_columns = [
-        'Period', 'Ranking Date', 'Type', 'Country', 'Category', 'Criteria', 'Rank', 'Rank Change',
-        'Video Title', target_metric_col, 'Upload Date', 'Tags',
-        'Channel Name', 'Subscribers', 'Thumbnail', 'Video ID'
-    ]
-    
-    # 누락된 표준 컬럼들을 None으로 보강
-    for col in standard_columns:
-        if col not in df.columns:
-            df[col] = None
-
-    # 표준 컬럼 순서 재배치
-    standardized_df = df[standard_columns]
-
-    # 5. 기존 파일의 컬럼 구조가 표준 구조와 다르면 자동 갱신(마이그레이션)
-    if original_cols != standard_columns:
-        logger.info(f"[Migration] 구버전 스키마 감지: '{filepath}'의 포맷을 표준 형식으로 강제 업데이트합니다.")
-        try:
-            standardized_df.to_csv(filepath, index=False, encoding='utf-8-sig')
-            logger.info(f"✓ '{filepath}' 파일 포맷 마이그레이션 완료")
-        except Exception as save_err:
-            logger.warning(f"구버전 파일 표준 포맷 강제 갱신 저장 실패: {save_err}")
-
-    standardized_df = standardize_dataframe_types(standardized_df, target_criteria)
-    return standardized_df
-
-
 # ==============================================================================
 # UI 설정 자동 보존 헬퍼 선언
 # ==============================================================================
@@ -357,6 +154,7 @@ def load_settings():
         "crawl_login": False,
         "crawl_limit": 100,
         "crawl_criteria": "조회수 순위",
+        "crawl_all_criteria": False,
         
         # 탭 2 (플레이보드 크롤링 데이터 대시보드 & 검색)
         "dash_criteria": "조회수 순위",
@@ -570,6 +368,14 @@ with tabs[0]:
             disabled=batch_mode
         )
         
+        # 9-1. 모든 수집기준 수집하기 체크박스
+        crawl_all_criteria = st.checkbox(
+            "📋 모든 수집기준 수집하기 (조회수/좋아요/댓글 순위 순차 순회)",
+            value=saved_ui.get("crawl_all_criteria", False),
+            key="crawl_all_criteria",
+            help="이 옵션을 활성화하면, 아래 선택된 수집 기준에 관계없이 조회수 순위, 좋아요 순위, 댓글 순위의 3대 핵심 차트를 순차적으로 모두 자동 크롤링합니다."
+        )
+
         # 9. 수집 기준
         criteria_options = ["조회수 순위", "좋아요 순위", "댓글 순위"]
         criteria_val = saved_ui.get("crawl_criteria", "조회수 순위")
@@ -579,6 +385,7 @@ with tabs[0]:
             criteria_options,
             index=criteria_idx,
             key="crawl_criteria",
+            disabled=crawl_all_criteria,
             help="크롤링할 플레이보드 차트의 정렬 기준을 선택합니다. (조회수 순위, 좋아요 순위, 댓글 순위 중 선택)"
         )
         
@@ -632,59 +439,26 @@ with tabs[0]:
             st.session_state['crawl_result'] = None
             st.rerun()
         
+        # 3대 기준 리스트 결정
+        active_criteria_list = ["조회수 순위", "좋아요 순위", "댓글 순위"] if crawl_all_criteria else [crawl_criteria]
+        calc_ranking_date = specific_date if use_specific_date else get_actual_ranking_date_str(specific_date)
+
         if not batch_mode:
             # 단일 카테고리 예측
-            calc_ranking_date = specific_date if use_specific_date else get_actual_ranking_date_str(specific_date)
-            existing_filepath = find_existing_batch_file(
-                base_dir=Config.OUTPUT_DIR,
-                target_type=target_type,
-                category=category,
-                country=country,
-                period=period,
-                criteria=crawl_criteria,
-                ranking_date=calc_ranking_date
-            )
-            
-            already_collected = 0
-            if existing_filepath:
-                try:
-                    existing_df = load_and_standardize_csv(existing_filepath, crawl_criteria)
-                    already_collected = len(existing_df)
-                except Exception:
-                    pass
-            
-            if already_collected == 0:
-                date_label = f"'{calc_ranking_date}' 기준"
-                st.info(f"📂 **[신규 파일 생성]** {date_label} 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
-            elif already_collected >= crawl_limit:
-                st.success(f"✓ **[수집 완료 건너뜀]** 이미 **{already_collected}**개가 수집되어 목표치({crawl_limit}개)를 충족했습니다. 크롤링을 건너뜁니다.")
-            else:
-                st.warning(f"🔄 **[기존 파일 채우기]** 이미 **{already_collected}**개가 수집되어 있습니다. 부족한 **{crawl_limit - already_collected}**개를 추가 수집합니다.")
-        else:
-            # 일괄 카테고리 예측
-            calc_ranking_date = specific_date if use_specific_date else get_actual_ranking_date_str(specific_date)
-            all_categories = get_category_list()
-            batch_records = []
-            new_cats = 0
-            update_cats = 0
-            skip_cats = 0
-            
-            for cat in all_categories:
-                batch_cat_name = f"batch_{cat}"
-                existing_filepath = find_existing_batch_file(
-                    base_dir=Config.OUTPUT_DIR,
+            predict_records = []
+            for crit in active_criteria_list:
+                existing_filepath = find_existing_batch_file_runner(
                     target_type=target_type,
-                    category=batch_cat_name,
+                    category=category,
                     country=country,
                     period=period,
-                    criteria=crawl_criteria,
+                    criteria=crit,
                     ranking_date=calc_ranking_date
                 )
-                
                 already_collected = 0
                 if existing_filepath:
                     try:
-                        existing_df = load_and_standardize_csv(existing_filepath, crawl_criteria)
+                        existing_df = load_and_standardize_csv(existing_filepath, crit)
                         already_collected = len(existing_df)
                     except Exception:
                         pass
@@ -692,22 +466,80 @@ with tabs[0]:
                 if already_collected == 0:
                     status = "📂 신규 생성"
                     add_count = crawl_limit
-                    new_cats += 1
                 elif already_collected >= crawl_limit:
                     status = "✓ 완료 건너뜀"
                     add_count = 0
-                    skip_cats += 1
                 else:
                     status = "🔄 기존 파일 채우기"
                     add_count = crawl_limit - already_collected
-                    update_cats += 1
                     
-                batch_records.append({
-                    "카테고리": cat,
+                predict_records.append({
+                    "수집 기준": crit,
                     "예측 동작": status,
                     "현재 수집량": already_collected,
                     "추가 수집량": add_count
                 })
+            
+            df_predict = pd.DataFrame(predict_records)
+            st.dataframe(df_predict, use_container_width=True, hide_index=True)
+            
+            if len(active_criteria_list) == 1:
+                rec = predict_records[0]
+                if rec["현재 수집량"] == 0:
+                    date_label = f"'{calc_ranking_date}' 기준"
+                    st.info(f"📂 **[신규 파일 생성]** {date_label} 파일이 없습니다. 새롭게 **{crawl_limit}**개를 수집합니다.")
+                elif rec["현재 수집량"] >= crawl_limit:
+                    st.success(f"✓ **[수집 완료 건너뜀]** 이미 **{rec['현재 수집량']}**개가 수집되어 목표치({crawl_limit}개)를 충족했습니다. 크롤링을 건너뜁니다.")
+                else:
+                    st.warning(f"🔄 **[기존 파일 채우기]** 이미 **{rec['현재 수집량']}**개가 수집되어 있습니다. 부족한 **{crawl_limit - rec['현재 수집량']}**개를 추가 수집합니다.")
+        else:
+            # 일괄 카테고리 예측
+            all_categories = get_category_list()
+            batch_records = []
+            new_cats = 0
+            update_cats = 0
+            skip_cats = 0
+            
+            for crit in active_criteria_list:
+                for cat in all_categories:
+                    batch_cat_name = f"batch_{cat}"
+                    existing_filepath = find_existing_batch_file_runner(
+                        target_type=target_type,
+                        category=batch_cat_name,
+                        country=country,
+                        period=period,
+                        criteria=crit,
+                        ranking_date=calc_ranking_date
+                    )
+                    
+                    already_collected = 0
+                    if existing_filepath:
+                        try:
+                            existing_df = load_and_standardize_csv(existing_filepath, crit)
+                            already_collected = len(existing_df)
+                        except Exception:
+                            pass
+                    
+                    if already_collected == 0:
+                        status = "📂 신규 생성"
+                        add_count = crawl_limit
+                        new_cats += 1
+                    elif already_collected >= crawl_limit:
+                        status = "✓ 완료 건너뜀"
+                        add_count = 0
+                        skip_cats += 1
+                    else:
+                        status = "🔄 기존 파일 채우기"
+                        add_count = crawl_limit - already_collected
+                        update_cats += 1
+                        
+                    batch_records.append({
+                        "수집 기준": crit,
+                        "카테고리": cat,
+                        "예측 동작": status,
+                        "현재 수집량": already_collected,
+                        "추가 수집량": add_count
+                    })
             
             # 요약 표시
             summary_txt = []
@@ -859,544 +691,25 @@ with tabs[0]:
             logger.addHandler(streamlit_handler)
             
             try:
-                ranking_date = specific_date if specific_date else datetime.now().strftime('%Y-%m-%d')
-                calc_ranking_date = ranking_date if use_specific_date else get_actual_ranking_date_str(ranking_date)
-                target_count = crawl_limit
-                
-                logger.info("=" * 60)
-                logger.info("🚀 [크롤링 기동 옵션 디버그]")
-                logger.info(f"  - 수집 대상 (Target Type)  : {target_type}")
-                logger.info(f"  - 배치 모드 (Batch Mode)   : {batch_mode}")
-                logger.info(f"  - 카테고리 (Category)      : {category if not batch_mode else '전체 일괄'}")
-                logger.info(f"  - 국가 (Country)           : {country}")
-                logger.info(f"  - 기간 (Period)            : {period}")
-                logger.info(f"  - 특정 날짜 수집 (Use Date): {use_specific_date} (날짜: {ranking_date})")
-                logger.info(f"  - 로그인 모드 (Login Mode) : {login_mode}")
-                logger.info(f"  - 수집 제한 개수 (Limit)   : {target_count}")
-                logger.info(f"  - 수집 기준 (Criteria)     : {crawl_criteria}")
-                logger.info("=" * 60)
-                
-                timestamp = None
-                if use_specific_date and specific_date:
-                    dt = datetime.strptime(specific_date, '%Y-%m-%d')
-                    timestamp = int(dt.timestamp())
-                
-                crawler = PlayboardCrawler(headless=Config.CHROME_HEADLESS)
-                crawler.skip_requested = False
-                st.session_state['crawler_instance'] = crawler
-                
-                if not batch_mode:
-                    status_text.info(f"크롤링 시작 중: {target_type} / {category} / {country} / {period}...")
-                    progress_bar.progress(0.1)
-                    
-                    url = build_url(target_type, category, country, period, timestamp)
-                    logger.info(f"Built URL: {url}")
-                    
-                    existing_filepath = find_existing_batch_file(
-                        base_dir=Config.OUTPUT_DIR,
-                        target_type=target_type,
-                        category=category,
-                        country=country,
-                        period=period,
-                        criteria=crawl_criteria,
-                        ranking_date=calc_ranking_date
-                    )
-                    
-                    already_collected = 0
-                    existing_df = pd.DataFrame()
-                    if existing_filepath:
-                        try:
-                            existing_df = load_and_standardize_csv(existing_filepath, crawl_criteria)
-                            already_collected = len(existing_df)
-                            logger.info(f"이어서 수집: 기존 파일 발견 -> {existing_filepath} (기존 {already_collected}개)")
-                        except Exception as csv_err:
-                            logger.warning(f"기존 CSV 파일 읽기 실패 (새로 수집 진행): {csv_err}")
-                            
-                    if already_collected >= target_count:
-                        logger.info(f"이미 {already_collected}개의 항목이 수집되어 목표치 {target_count}에 도달했습니다. 수집을 건너뜁니다.")
-                        df = existing_df.head(target_count)
-                        progress_bar.progress(0.8)
-                    else:
-                        progress_bar.progress(0.3)
-                        df_new = crawler.crawl(
-                            url=url,
-                            target_type=target_type,
-                            login_mode=login_mode,
-                            target_count=target_count,
-                            country=country,
-                            period=period,
-                            ranking_date=ranking_date,
-                            ranking_criteria=crawl_criteria,
-                            start_rank=already_collected,
-                            keep_open=True,
-                            category=category,
-                            use_specific_date=use_specific_date
-                        )
-                        
-                        progress_bar.progress(0.8)
-                        if len(existing_df) > 0 and len(df_new) > 0:
-                            existing_df = standardize_dataframe_types(existing_df, crawl_criteria)
-                            df_new = standardize_dataframe_types(df_new, crawl_criteria)
-                            df = pd.concat([existing_df, df_new], ignore_index=True)
-                            if 'Video ID' in df.columns:
-                                df = df.drop_duplicates(subset=['Video ID'], keep='last')
-                            else:
-                                df = df.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
-                        else:
-                            df = df_new if len(df_new) > 0 else existing_df
-                            
-                        # Rank 값 1부터 정렬해서 재정의 (이가 빠지지 않도록 연속적인 순번 부여)
-                        if len(df) > 0 and 'Rank' in df.columns:
-                            df = standardize_dataframe_types(df, crawl_criteria)
-                            df = df.sort_values(by='Rank').reset_index(drop=True)
-                            df['Rank'] = range(1, len(df) + 1)
-                            
-                        # 실제 수집 데이터의 랭킹 날짜로 최종 네이밍 확정 (수집일이 아닌 랭킹 날짜 기준)
-                        final_ranking_date = calc_ranking_date
-                        if len(df) > 0 and 'Ranking Date' in df.columns:
-                            first_val = df['Ranking Date'].iloc[0]
-                            if pd.notna(first_val) and str(first_val) != 'N/A':
-                                final_ranking_date = str(first_val).strip()
-                                logger.info(f"[Save Path] 실제 감지된 날짜 기준으로 경로를 확정합니다: {final_ranking_date}")
-
-                        filepath, filename = generate_safe_filepath(
-                            base_dir=Config.OUTPUT_DIR,
-                            target_type=target_type,
-                            category=category,
-                            country=country,
-                            period=period,
-                            criteria=crawl_criteria,
-                            ranking_date=final_ranking_date,
-                            extension='csv'
-                        )
-                        
-                        if len(df) > 0:
-                            metric_col = 'Views'
-                            if crawl_criteria == '좋아요 순위':
-                                metric_col = 'Likes'
-                            elif crawl_criteria == '댓글 순위':
-                                metric_col = 'Comments'
-                            
-                            csv_columns = ['Period', 'Ranking Date', 'Type', 'Country', 'Category', 'Criteria', 'Rank', 'Rank Change',
-                                           'Video Title', metric_col, 'Upload Date', 'Tags',
-                                           'Channel Name', 'Subscribers', 'Thumbnail', 'Video ID']
-                            csv_df = df[[col for col in csv_columns if col in df.columns]]
-                            csv_df.to_csv(filepath, index=False, encoding='utf-8-sig')
-                            logger.info(f"✓ [CSV 저장 완료] 경로: {filepath} | 파일명: {filename}")
-                        
-                    if len(df) > 0:
-                        db_count = db_handler.insert_dataframe(df, category, country, period, target_type)
-                        db_handler.log_crawl_history(target_type, category, country, period, len(df), success=True)
-                        
-                        stats = {
-                            "target_cats_count": 1,
-                            "target_limit": target_count,
-                            "updated_files_count": 1,
-                            "updated_rows_count": len(df),
-                            "newly_crawled_rows": len(df_new) if 'df_new' in locals() and df_new is not None else len(df),
-                            "failed_cats_count": 0,
-                            "failed_cats_list": []
-                        }
-                        
-                        logger.info("============================================================\n"
-                                    "🏆 [단일 크롤링 최종 수집 통계 요약]\n"
-                                    f"  - 목표 카테고리 개수 : 1개 ({category})\n"
-                                    f"  - 카테고리당 목표 개수 : {target_count}개\n"
-                                    f"  - 실제 업데이트된 파일 수 : 1개\n"
-                                    f"  - 업데이트된 파일의 총 행 수 : {len(df)}개\n"
-                                    f"  - 새로 추가 수집된 영상 수   : {stats['newly_crawled_rows']}개\n"
-                                    f"  - 실패한 카테고리 개수 : 0개\n"
-                                    "============================================================")
-
-                        st.session_state['crawl_result'] = {
-                            "status": "success",
-                            "is_batch": False,
-                            "data": df.head(20).to_dict('records') if hasattr(df, 'to_dict') else [],
-                            "filepath": filepath,
-                            "filename": filename if 'filename' in locals() else os.path.basename(filepath),
-                            "msg": f"✓ 단일 크롤링 완료: 총 {len(df)}개 항목 수집 및 DB 저장 완료 ({filename if 'filename' in locals() else os.path.basename(filepath)})",
-                            "stats": stats
-                        }
-                    else:
-                        st.session_state['crawl_result'] = {
-                            "status": "warning",
-                            "is_batch": False,
-                            "msg": "⚠ 수집된 데이터가 없습니다."
-                        }
-                        
-                else:
-                    all_categories = get_category_list()
-                    
-                    # 통계 트래킹용 변수
-                    target_cats_count = len(all_categories)
-                    target_limit = target_count
-                    updated_files_count = 0  # 실제 크롤링이 진행되어 업데이트된 파일 수
-                    updated_rows_count = 0   # 실제 크롤링이 진행되어 저장된 최종 행 개수의 합
-                    newly_crawled_rows = 0   # 새로 추가로 수집된 영상 행 수
-                    failed_cats_list = []
-                    skip_cats_count = 0
-                    
-                    # 1. 크롤링 전수조사 및 분류
-                    needs_crawl = []   # (cat, existing_filepath, existing_df, already_collected) 튜플 저장
-                    skipped_data = []  # 이미 수집 완료된 데이터 목록
-                    success_count = 0
-                    fail_count = 0
-                    
-                    for cat in all_categories:
-                        batch_cat_name = f"batch_{cat}"
-                        existing_filepath = find_existing_batch_file(
-                            base_dir=Config.OUTPUT_DIR,
-                            target_type=target_type,
-                            category=batch_cat_name,
-                            country=country,
-                            period=period,
-                            criteria=crawl_criteria,
-                            ranking_date=calc_ranking_date
-                        )
-                        
-                        already_collected = 0
-                        existing_df = pd.DataFrame()
-                        if existing_filepath:
-                            try:
-                                existing_df = load_and_standardize_csv(existing_filepath, crawl_criteria)
-                                already_collected = len(existing_df)
-                            except Exception as csv_err:
-                                logger.warning(f"기존 CSV 파일 읽기 실패 (새로 수집 진행): {csv_err}")
-                                
-                        if already_collected >= target_count:
-                            logger.info(f"카테고리 '{cat}'은 이미 {already_collected}개 수집 완료되었습니다. 실제 수집 제외.")
-                            df_cat = existing_df.head(target_count)
-                            if len(df_cat) > 0:
-                                skipped_data.extend(df_cat.to_dict('records'))
-                            success_count += 1
-                            skip_cats_count += 1
-                        else:
-                            needs_crawl.append((cat, existing_filepath, existing_df, already_collected))
-                    
-                    all_data = list(skipped_data)
-                    
-                    if not needs_crawl:
-                        logger.info("모든 카테고리가 이미 수집 목표치를 충족하였습니다. 크롤링 순회를 스킵합니다.")
-                        status_text.success("✓ 모든 카테고리가 이미 목표 개수를 충족하여 수집을 건너뜁니다.")
-                        progress_bar.progress(1.0)
-                    else:
-                        status_text.info(f"일괄 크롤링 시작: 실제 수집 대상 {len(needs_crawl)}개 카테고리 순회 중...")
-                        
-                        for idx, (cat, existing_filepath, existing_df, already_collected) in enumerate(needs_crawl):
-                            pct = (idx / len(needs_crawl))
-                            progress_bar.progress(pct)
-                            status_text.info(f"카테고리 수집 중 ({idx+1}/{len(needs_crawl)}): '{cat}' 진행 중...")
-                            
-                            try:
-                                url = build_url(target_type, cat, country, period, timestamp)
-                                df_cat_new = crawler.crawl(
-                                    url=url,
-                                    target_type=target_type,
-                                    login_mode=login_mode,
-                                    target_count=target_count,
-                                    country=country,
-                                    period=period,
-                                    ranking_date=ranking_date,
-                                    ranking_criteria=crawl_criteria,
-                                    start_rank=already_collected,
-                                    keep_open=True,
-                                    category=cat,
-                                    use_specific_date=use_specific_date
-                                )
-                                # 사용자의 다음 카테고리 스킵 감지
-                                if getattr(crawler, 'skip_requested', False):
-                                    crawler.skip_requested = False  # 플래그 초기화
-                                    logger.warning(f"⏯️ 사용자 요청에 의해 카테고리 '{cat}' 수집이 스킵되었습니다. 다음 카테고리로 넘어갑니다.")
-                                    continue
-                                    
-                                if len(existing_df) > 0 and len(df_cat_new) > 0:
-                                    existing_df = standardize_dataframe_types(existing_df, crawl_criteria)
-                                    df_cat_new = standardize_dataframe_types(df_cat_new, crawl_criteria)
-                                    df_cat = pd.concat([existing_df, df_cat_new], ignore_index=True)
-                                    if 'Video ID' in df_cat.columns:
-                                        df_cat = df_cat.drop_duplicates(subset=['Video ID'], keep='last')
-                                    else:
-                                        df_cat = df_cat.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
-                                else:
-                                    df_cat = df_cat_new if len(df_cat_new) > 0 else existing_df
-                                    
-                                # Rank 값 1부터 정렬해서 재정의 (이가 빠지지 않도록 연속적인 순번 부여)
-                                if len(df_cat) > 0 and 'Rank' in df_cat.columns:
-                                    df_cat = standardize_dataframe_types(df_cat, crawl_criteria)
-                                    df_cat = df_cat.sort_values(by='Rank').reset_index(drop=True)
-                                    df_cat['Rank'] = range(1, len(df_cat) + 1)
-                                    
-                                # 실제 수집 데이터의 랭킹 날짜로 최종 네이밍 확정 (수집일이 아닌 랭킹 날짜 기준)
-                                final_ranking_date = calc_ranking_date
-                                if len(df_cat) > 0 and 'Ranking Date' in df_cat.columns:
-                                    first_val = df_cat['Ranking Date'].iloc[0]
-                                    if pd.notna(first_val) and str(first_val) != 'N/A':
-                                        final_ranking_date = str(first_val).strip()
-
-                                batch_cat_name = f"batch_{cat}"
-                                filepath, filename = generate_safe_filepath(
-                                    base_dir=Config.OUTPUT_DIR,
-                                    target_type=target_type,
-                                    category=batch_cat_name,
-                                    country=country,
-                                    period=period,
-                                    criteria=crawl_criteria,
-                                    ranking_date=final_ranking_date,
-                                    extension='csv'
-                                )
-                                    
-                                if len(df_cat) > 0:
-                                    metric_col = 'Views'
-                                    if crawl_criteria == '좋아요 순위':
-                                        metric_col = 'Likes'
-                                    elif crawl_criteria == '댓글 순위':
-                                        metric_col = 'Comments'
-                                    
-                                    csv_columns = ['Period', 'Ranking Date', 'Type', 'Country', 'Category', 'Criteria', 'Rank', 'Rank Change',
-                                                   'Video Title', metric_col, 'Upload Date', 'Tags',
-                                                   'Channel Name', 'Subscribers', 'Thumbnail', 'Video ID']
-                                    csv_df = df_cat[[col for col in csv_columns if col in df_cat.columns]]
-                                    csv_df.to_csv(filepath, index=False, encoding='utf-8-sig')
-                                    logger.info(f"✓ [CSV 저장 완료] 경로: {filepath} | 파일명: {os.path.basename(filepath)}")
-                                    
-                                    # 통계 정보 누적
-                                    updated_files_count += 1
-                                    updated_rows_count += len(df_cat)
-                                    newly_crawled_rows += len(df_cat_new) if 'df_cat_new' in locals() and df_cat_new is not None else len(df_cat)
-                                    
-                                if len(df_cat) > 0:
-                                    all_data.extend(df_cat.to_dict('records'))
-                                    success_count += 1
-                                    db_handler.insert_dataframe(df_cat, cat, country, period, target_type)
-                                    db_handler.log_crawl_history(target_type, cat, country, period, len(df_cat), success=True)
-                                else:
-                                    fail_count += 1
-                            except Exception as cat_err:
-                                fail_count += 1
-                                failed_cats_list.append(cat)
-                                import traceback
-                                err_detail = traceback.format_exc()
-                                logger.error(f"Error in batch category '{cat}': {cat_err}\n{err_detail}")
-                                db_handler.log_crawl_history(target_type, cat, country, period, 0, success=False, error_message=str(cat_err))
-                                
-                                # 윈도우 OS 알림 및 효과음 발송
-                                try:
-                                    from modules.utils import show_notification, play_notification_sound
-                                    play_notification_sound()
-                                    show_notification(
-                                        "유튜브 일괄 크롤러 기동 에러 발생",
-                                        f"카테고리 '{cat}' 수집 중 에러가 발생하여 수집이 중단되었습니다: {cat_err}"
-                                    )
-                                except Exception as notify_err:
-                                    logger.debug(f"Failed to send exception notification: {notify_err}")
-                                    
-                                # 에러 상황 세션 바인딩 및 루프 즉시 중단(중지)
-                                err_stats = {
-                                    "target_cats_count": target_cats_count,
-                                    "target_limit": target_limit,
-                                    "skip_cats_count": skip_cats_count,
-                                    "updated_files_count": updated_files_count,
-                                    "updated_rows_count": updated_rows_count,
-                                    "newly_crawled_rows": newly_crawled_rows,
-                                    "failed_cats_count": len(failed_cats_list),
-                                    "failed_cats_list": failed_cats_list
-                                }
-                                
-                                logger.info("============================================================\n"
-                                            "🏆 [일괄 크롤링 최종 수집 통계 요약 (실패)]\n"
-                                            f"  - 목표 카테고리 개수 : {target_cats_count}개\n"
-                                            f"  - 카테고리당 목표 개수 : {target_limit}개\n"
-                                            f"  - 건너뛴 카테고리 개수 : {skip_cats_count}개 (이미 목표치 충족)\n"
-                                            f"  - 실제 업데이트된 파일 수 : {updated_files_count}개\n"
-                                            f"  - 업데이트된 파일의 총 행 수 : {updated_rows_count}개\n"
-                                            f"  - 새로 추가 수집된 영상 수   : {newly_crawled_rows}개\n"
-                                            f"  - 수집 성공 카테고리 수 : {success_count}개\n"
-                                            f"  - 수집 실패 카테고리 수 : {len(failed_cats_list)}개\n"
-                                            f"  - 실패한 카테고리 목록   : {', '.join(failed_cats_list)}\n"
-                                            "============================================================")
-                                            
-                                st.session_state['crawl_result'] = {
-                                    "status": "error",
-                                    "is_batch": True,
-                                    "msg": f"✗ 일괄 크롤링 수집 실패: 카테고리 '{cat}' 수집 중 에러 발생 ({cat_err})",
-                                    "stats": err_stats
-                                }
-                                break
-                                
-                        progress_bar.progress(1.0)
-                    
-                    if all_data:
-                        combined_df = pd.DataFrame(all_data)
-                        
-                        # 각 서브 카테고리별 수집 완성도 검증 및 summary_df / under_target_df 작성
-                        summary_records = []
-                        under_target_records = []
-                        for cat in all_categories:
-                            cat_df = combined_df[combined_df['Category'] == cat] if 'Category' in combined_df.columns else pd.DataFrame()
-                            collected_count = len(cat_df)
-                            status = "✓ 충족" if collected_count >= target_count else "⚠️ 미달"
-                            shortage = max(0, target_count - collected_count)
-                            
-                            summary_records.append({
-                                "카테고리": cat,
-                                "목표 수량": target_count,
-                                "실제 수집 수량": collected_count,
-                                "부족분": shortage,
-                                "상태": status
-                            })
-                            
-                            if collected_count < target_count:
-                                under_target_records.append({
-                                    "카테고리": cat,
-                                    "목표 수량": target_count,
-                                    "실제 수집 수량": collected_count,
-                                    "부족 수량": shortage
-                                })
-                        
-                        summary_df = pd.DataFrame(summary_records)
-                        under_target_df = pd.DataFrame(under_target_records)
-                        
-                        final_comb_date = calc_ranking_date
-                        if len(combined_df) > 0 and 'Ranking Date' in combined_df.columns:
-                            first_val = combined_df['Ranking Date'].iloc[0]
-                            if pd.notna(first_val) and str(first_val) != 'N/A':
-                                final_comb_date = str(first_val).strip()
-
-                        filepath_comb, filename_comb = generate_safe_filepath(
-                            base_dir=Config.OUTPUT_DIR,
-                            target_type=target_type,
-                            category='ALL',
-                            country=country,
-                            period=period,
-                            criteria=crawl_criteria,
-                            ranking_date=final_comb_date,
-                            extension='csv'
-                        )
-                        
-                        metric_col = 'Views'
-                        if crawl_criteria == '좋아요 순위':
-                            metric_col = 'Likes'
-                        elif crawl_criteria == '댓글 순위':
-                            metric_col = 'Comments'
-                        
-                        csv_columns = ['Period', 'Ranking Date', 'Type', 'Country', 'Category', 'Criteria', 'Rank', 'Rank Change',
-                                       'Video Title', metric_col, 'Upload Date', 'Tags',
-                                       'Channel Name', 'Subscribers', 'Thumbnail', 'Video ID']
-                        csv_df = combined_df[[col for col in csv_columns if col in combined_df.columns]]
-                        csv_df.to_csv(filepath_comb, index=False, encoding='utf-8-sig')
-                        logger.info(f"✓ [통합 CSV 저장 완료] 경로: {filepath_comb} | 파일명: {filename_comb}")
-                        
-                        # 최종 성공 통계 딕셔너리 구성
-                        success_stats = {
-                            "target_cats_count": target_cats_count,
-                            "target_limit": target_limit,
-                            "skip_cats_count": skip_cats_count,
-                            "updated_files_count": updated_files_count,
-                            "updated_rows_count": updated_rows_count,
-                            "newly_crawled_rows": newly_crawled_rows,
-                            "failed_cats_count": len(failed_cats_list),
-                            "failed_cats_list": failed_cats_list
-                        }
-                        
-                        logger.info("============================================================\n"
-                                    "🏆 [일괄 크롤링 최종 수집 통계 요약]\n"
-                                    f"  - 목표 카테고리 개수 : {target_cats_count}개\n"
-                                    f"  - 카테고리당 목표 개수 : {target_limit}개\n"
-                                    f"  - 건너뛴 카테고리 개수 : {skip_cats_count}개 (이미 목표치 충족)\n"
-                                    f"  - 실제 업데이트된 파일 수 : {updated_files_count}개\n"
-                                    f"  - 업데이트된 파일의 총 행 수 : {updated_rows_count}개\n"
-                                    f"  - 새로 추가 수집된 영상 수   : {newly_crawled_rows}개\n"
-                                    f"  - 수집 성공 카테고리 수 : {success_count}개\n"
-                                    f"  - 수집 실패 카테고리 수 : {len(failed_cats_list)}개\n"
-                                    f"  - 실패한 카테고리 목록   : {', '.join(failed_cats_list) if failed_cats_list else '없음'}\n"
-                                    "============================================================")
-
-                        st.session_state['crawl_result'] = {
-                            "status": "success",
-                            "is_batch": True,
-                            "summary_data": summary_df.to_dict('records') if hasattr(summary_df, 'to_dict') else [],
-                            "under_target_data": under_target_df.to_dict('records') if hasattr(under_target_df, 'to_dict') else [],
-                            "data": combined_df.head(20).to_dict('records') if hasattr(combined_df, 'to_dict') else [],
-                            "filepath": filepath_comb,
-                            "filename": filename_comb if 'filename_comb' in locals() else os.path.basename(filepath_comb),
-                            "target_count": target_count,
-                            "msg": f"✓ 일괄 크롤링 완료: 성공 {success_count}개, 실패 {fail_count}개 (총 {len(combined_df)}개 레코드 저장)",
-                            "stats": success_stats
-                        }
-                    else:
-                        st.session_state['crawl_result'] = {
-                            "status": "error",
-                            "is_batch": True,
-                            "msg": "✗ 모든 카테고리 일괄 크롤링 수집 실패"
-                        }
-                        
+                run_crawling_by_criteria(
+                    target_type=target_type,
+                    batch_mode=batch_mode,
+                    category=category,
+                    country=country,
+                    period=period,
+                    specific_date=specific_date,
+                    use_specific_date=use_specific_date,
+                    login_mode=login_mode,
+                    crawl_limit=crawl_limit,
+                    crawl_criteria=crawl_criteria,
+                    crawl_all_criteria=crawl_all_criteria,
+                    status_text=status_text,
+                    progress_bar=progress_bar,
+                    log_shell=log_shell
+                )
             except Exception as e:
-                progress_bar.progress(1.0)
-                
-                # 에러 상황 통계 구성 (단일 vs 일괄 분기)
-                if not batch_mode:
-                    err_stats = {
-                        "target_cats_count": 1,
-                        "target_limit": target_count if 'target_count' in locals() else 100,
-                        "updated_files_count": 0,
-                        "updated_rows_count": 0,
-                        "newly_crawled_rows": 0,
-                        "failed_cats_count": 1,
-                        "failed_cats_list": [category] if 'category' in locals() else ["알수없음"]
-                    }
-                    logger.info("============================================================\n"
-                                "🏆 [단일 크롤링 최종 수집 통계 요약 (실패)]\n"
-                                f"  - 목표 카테고리 개수 : 1개 ({category if 'category' in locals() else '알수없음'})\n"
-                                f"  - 카테고리당 목표 개수 : {err_stats['target_limit']}개\n"
-                                f"  - 실제 업데이트된 파일 수 : 0개\n"
-                                f"  - 업데이트된 파일의 총 행 수 : 0개\n"
-                                f"  - 실패한 카테고리 개수 : 1개 ({category if 'category' in locals() else '알수없음'})\n"
-                                "============================================================")
-                else:
-                    l_failed = failed_cats_list if 'failed_cats_list' in locals() else ([category] if 'category' in locals() else ["알수없음"])
-                    err_stats = {
-                        "target_cats_count": target_cats_count if 'target_cats_count' in locals() else (len(all_categories) if 'all_categories' in locals() else 12),
-                        "target_limit": target_limit if 'target_limit' in locals() else (target_count if 'target_count' in locals() else 100),
-                        "skip_cats_count": skip_cats_count if 'skip_cats_count' in locals() else 0,
-                        "updated_files_count": updated_files_count if 'updated_files_count' in locals() else 0,
-                        "updated_rows_count": updated_rows_count if 'updated_rows_count' in locals() else 0,
-                        "newly_crawled_rows": newly_crawled_rows if 'newly_crawled_rows' in locals() else 0,
-                        "failed_cats_count": len(l_failed),
-                        "failed_cats_list": l_failed
-                    }
-                    logger.info("============================================================\n"
-                                "🏆 [일괄 크롤링 최종 수집 통계 요약 (실패)]\n"
-                                f"  - 목표 카테고리 개수 : {err_stats['target_cats_count']}개\n"
-                                f"  - 카테고리당 목표 개수 : {err_stats['target_limit']}개\n"
-                                f"  - 건너뛴 카테고리 개수 : {err_stats.get('skip_cats_count', 0)}개 (이미 목표치 충족)\n"
-                                f"  - 실제 업데이트된 파일 수 : {err_stats['updated_files_count']}개\n"
-                                f"  - 업데이트된 파일의 총 행 수 : {err_stats['updated_rows_count']}개\n"
-                                f"  - 새로 추가 수집된 영상 수   : {err_stats['newly_crawled_rows']}개\n"
-                                f"  - 수집 실패 카테고리 수 : {err_stats['failed_cats_count']}개\n"
-                                f"  - 실패한 카테고리 목록   : {', '.join(err_stats['failed_cats_list'])}\n"
-                                "============================================================")
-
-                st.session_state['crawl_result'] = {
-                    "status": "error",
-                    "msg": f"✗ 크롤링 도중 예외가 발생했습니다: {e}",
-                    "stats": err_stats
-                }
-                
-                # 상세 트레이스백 및 예외 로그 인쇄
-                import traceback
-                err_detail = traceback.format_exc()
-                logger.error(f"Crawler error: {e}\n{err_detail}")
-                
-                # 윈도우 OS 알림 및 효과음 발송
-                try:
-                    from modules.utils import show_notification, play_notification_sound
-                    play_notification_sound()
-                    show_notification(
-                        "유튜브 크롤러 기동 에러 발생",
-                        f"크롤링 동작 중 에러가 발생하여 중지되었습니다: {e}"
-                    )
-                except Exception as notify_err:
-                    logger.debug(f"Failed to send exception notification: {notify_err}")
+                logger.error(f"크롤러 실행 실패: {e}")
+                st.error(f"크롤러 실행 도중 시스템 에러 발생: {e}")
             finally:
                 if 'crawler_instance' in st.session_state and st.session_state['crawler_instance'] is not None:
                     try:
