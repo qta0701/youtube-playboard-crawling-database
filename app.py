@@ -1007,8 +1007,14 @@ with tabs[1]:
                 else:
                     df_dash['is_selected_crit'] = True
                 
-                sort_keys = ['is_selected_crit']
-                sort_asc = [False] # True가 먼저 오도록 내림차순
+                # (2) 카테고리가 'ALL' 또는 '전체' 통합 데이터가 아닌 구체적인 개별 배치 카테고리 데이터를 우선순위로 지정하여 개별 카테고리 필터링 시 데이터 누락 방지
+                if 'category' in df_dash.columns:
+                    df_dash['is_specific_cat'] = df_dash['category'].apply(lambda x: False if not x or str(x).upper() == 'ALL' or '전체' in str(x) else True)
+                else:
+                    df_dash['is_specific_cat'] = True
+                
+                sort_keys = ['is_selected_crit', 'is_specific_cat']
+                sort_asc = [False, False] # True가 먼저 오도록 내림차순
                 
                 if 'crawled_at_parsed' in df_dash.columns:
                     sort_keys.append('crawled_at_parsed')
@@ -1071,7 +1077,7 @@ with tabs[1]:
                 # '전체' 카테고리가 존재한다면 맨 앞에 위치시킴
                 has_jeonche = False
                 for r_cat in raw_cats:
-                    if r_cat and r_cat.replace("batch_", "") == "전체":
+                    if r_cat and r_cat.replace("batch_", "").replace("_", "/") == "전체":
                         has_jeonche = True
                         break
                 
@@ -1084,7 +1090,7 @@ with tabs[1]:
                 # 나머지 카테고리들 추가
                 for r_cat in raw_cats:
                     if r_cat:
-                        clean_cat = r_cat.replace("batch_", "")
+                        clean_cat = r_cat.replace("batch_", "").replace("_", "/")
                         if clean_cat not in categories_list:
                             categories_list.append(clean_cat)
                 
@@ -1118,14 +1124,14 @@ with tabs[1]:
                 # 카테고리별 데이터 개수 집계 테이블 렌더링
                 try:
                     df_count_temp = df_dash.copy()
-                    df_count_temp['clean_category'] = df_count_temp['category'].apply(lambda x: x.replace("batch_", "") if x else "")
+                    df_count_temp['clean_category'] = df_count_temp['category'].apply(lambda x: x.replace("batch_", "").replace("_", "/") if x else "")
                     counts = df_count_temp['clean_category'].value_counts()
                     
                     ordered_counts = []
                     for c_name in categories_list:
                         if c_name == "All":
                             # All은 '전체'를 제외한 다른 개별 카테고리의 중복 제거된 총합 행 수
-                            df_all_temp = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"]
+                            df_all_temp = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "").replace("_", "/") if x else "") != "전체"]
                             if not df_all_temp.empty:
                                 if "채널" in type_tab:
                                     all_val = len(df_all_temp.drop_duplicates(subset=["channel_name"], keep="last")) if "channel_name" in df_all_temp.columns else len(df_all_temp)
@@ -1150,9 +1156,9 @@ with tabs[1]:
                 
                 # 선택한 카테고리로 필터링 (SettingWithCopy 방지를 위해 명시적 .copy() 수행)
                 if selected_cat != "All":
-                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") == selected_cat].copy()
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "").replace("_", "/") if x else "") == selected_cat].copy()
                 else:
-                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "") if x else "") != "전체"].copy()
+                    df_filtered = df_dash[df_dash["category"].apply(lambda x: x.replace("batch_", "").replace("_", "/") if x else "") != "전체"].copy()
                 
                 # 모든 카테고리 필터 결과에서 중복 영상 제거 (동적 해시 방지 위해 타이틀/채널명 조합 활용)
                 # 정렬 옵션에 관계없이 항상 가장 최근 수집된(crawled_at이 최신인) 고유 단 건만 보존하여 정합성을 보장하기 위해,
@@ -1885,7 +1891,7 @@ with tabs[1]:
                                 meta_info = f"<span class='list-metric'>👁️ 조회수: {views_formatted}</span><span class='list-metric'>❤️ 좋아요: {likes_formatted}</span><span class='list-metric'>💬 댓글: {comments_formatted}</span>{ratio_html}"
                                 
                             raw_cat = row.get("category", "")
-                            clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
+                            clean_cat = raw_cat.replace("batch_", "").replace("_", "/") if raw_cat else "N/A"
                             
                             safe_title = clean_js_text(title)
                             safe_channel = clean_js_text(channel_name)
@@ -1998,7 +2004,7 @@ with tabs[1]:
                                     metric_html = f"<div class='card-info'>👁️ 조회수: {views_formatted}<br>❤️ 좋아요: {likes_formatted}<br>💬 댓글: {comments_formatted}<br>{ratio_html}</div>"
                                 
                                 raw_cat = row.get("category", "")
-                                clean_cat = raw_cat.replace("batch_", "") if raw_cat else "N/A"
+                                clean_cat = raw_cat.replace("batch_", "").replace("_", "/") if raw_cat else "N/A"
                                 
                                 safe_title = clean_js_text(title)
                                 safe_channel = clean_js_text(channel_name)
@@ -2281,7 +2287,7 @@ with tabs[1]:
                 conn.close()
                 
                 if not df_cat_s.empty:
-                    df_cat_s['category'] = df_cat_s['category'].str.replace('batch_', '')
+                    df_cat_s['category'] = df_cat_s['category'].str.replace('batch_', '').str.replace('_', '/')
                     fig = px.pie(df_cat_s, values='count', names='category', title='Shorts 수집 카테고리 비율', hole=.3)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
@@ -4700,7 +4706,10 @@ with st.sidebar:
             else:
                 type_folder = 'Others'
                 
-            target_dir = os.path.join(Config.OUTPUT_DIR, date_str_under, type_folder)
+            if country and country != '한국':
+                target_dir = os.path.join(Config.OUTPUT_DIR, date_str_under, type_folder, sanitize_filename(country))
+            else:
+                target_dir = os.path.join(Config.OUTPUT_DIR, date_str_under, type_folder)
             
             # 해당 날짜에 디렉토리가 존재하고 하위에 파일이 실제로 있는지 검사
             if os.path.exists(target_dir):

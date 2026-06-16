@@ -85,6 +85,12 @@ def restore_database():
                         print("빈 파일 스킵")
                         continue
                         
+                    # 폴더명(date_folder) 기준 날짜를 YYYY-MM-DD 형식으로 변환하여 Ranking Date 강제 보정
+                    correct_date = date_folder.replace('_', '-')
+                    df['Ranking Date'] = correct_date
+                    if 'ranking_date' in df.columns:
+                        df['ranking_date'] = correct_date
+                        
                     # Criteria 컬럼이 없으면 강제로 넣어줌
                     if 'Criteria' not in df.columns and 'criteria' not in df.columns:
                         df['Criteria'] = criteria

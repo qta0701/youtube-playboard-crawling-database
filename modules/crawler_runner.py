@@ -136,10 +136,17 @@ def run_crawling_by_criteria(
                         existing_df = standardize_dataframe_types(existing_df, cur_crit)
                         df_new = standardize_dataframe_types(df_new, cur_crit)
                         df = pd.concat([existing_df, df_new], ignore_index=True)
-                        if 'Video ID' in df.columns:
-                            df = df.drop_duplicates(subset=['Video ID'], keep='last')
+                        if target_type == 'channel':
+                            df = df.drop_duplicates(subset=['Channel Name'], keep='last')
                         else:
-                            df = df.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
+                            if 'Video ID' in df.columns:
+                                df_valid_id = df[df['Video ID'] != 'N/A']
+                                df_invalid_id = df[df['Video ID'] == 'N/A']
+                                df_valid_id = df_valid_id.drop_duplicates(subset=['Video ID'], keep='last')
+                                df_invalid_id = df_invalid_id.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
+                                df = pd.concat([df_valid_id, df_invalid_id], ignore_index=True)
+                            else:
+                                df = df.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
                     else:
                         df = df_new if len(df_new) > 0 else existing_df
                         
@@ -274,10 +281,17 @@ def run_crawling_by_criteria(
                                 existing_df = standardize_dataframe_types(existing_df, cur_crit)
                                 df_cat_new = standardize_dataframe_types(df_cat_new, cur_crit)
                                 df_cat = pd.concat([existing_df, df_cat_new], ignore_index=True)
-                                if 'Video ID' in df_cat.columns:
-                                    df_cat = df_cat.drop_duplicates(subset=['Video ID'], keep='last')
+                                if target_type == 'channel':
+                                    df_cat = df_cat.drop_duplicates(subset=['Channel Name'], keep='last')
                                 else:
-                                    df_cat = df_cat.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
+                                    if 'Video ID' in df_cat.columns:
+                                        df_valid_id = df_cat[df_cat['Video ID'] != 'N/A']
+                                        df_invalid_id = df_cat[df_cat['Video ID'] == 'N/A']
+                                        df_valid_id = df_valid_id.drop_duplicates(subset=['Video ID'], keep='last')
+                                        df_invalid_id = df_invalid_id.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
+                                        df_cat = pd.concat([df_valid_id, df_invalid_id], ignore_index=True)
+                                    else:
+                                        df_cat = df_cat.drop_duplicates(subset=['Video Title', 'Channel Name'], keep='last')
                             else:
                                 df_cat = df_cat_new if len(df_cat_new) > 0 else existing_df
                                 
@@ -546,7 +560,10 @@ def find_existing_batch_file_runner(target_type, category, country, period, crit
     else:
         type_folder = 'Others'
         
-    target_dir = os.path.join(Config.OUTPUT_DIR, date_folder, type_folder)
+    if country and country != '한국':
+        target_dir = os.path.join(Config.OUTPUT_DIR, date_folder, type_folder, sanitize_filename(country))
+    else:
+        target_dir = os.path.join(Config.OUTPUT_DIR, date_folder, type_folder)
     if not os.path.exists(target_dir):
         return None
         

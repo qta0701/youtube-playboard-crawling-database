@@ -257,7 +257,10 @@ def generate_safe_filepath(base_dir, target_type, category, country, period, cri
     else:
         type_folder = 'Others'
 
-    target_dir = os.path.join(base_dir, date_folder, type_folder)
+    if country and country != '한국':
+        target_dir = os.path.join(base_dir, date_folder, type_folder, sanitize_filename(country))
+    else:
+        target_dir = os.path.join(base_dir, date_folder, type_folder)
     ensure_directory_exists(target_dir)
 
     # 파일명 구성 요소 정제
