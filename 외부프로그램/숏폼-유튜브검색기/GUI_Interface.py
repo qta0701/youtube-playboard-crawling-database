@@ -397,15 +397,16 @@ class GoogleSheetsManager:
         last_row = self.get_last_row(sheet_name, start_row)
         next_row = last_row + 1
 
-        # 데이터를 행 단위로 변환 (필터링된 데이터 사용)
+        # 데이터를 행 단위로 변환 (지능형 정규화 매칭 적용)
         rows_to_add = []
         for data in filtered_data_list:
             row = [''] * len(headers)  # 빈 행 초기화 (새 헤더 포함)
 
             for key, value in data.items():
-                if key in header_mapping:
-                    col_idx = header_mapping[key] - 1  # 0-based index
-                    row[col_idx] = str(value) if value is not None else ''
+                norm_key = normalize_header(key)
+                for h_idx, h in enumerate(headers):
+                    if normalize_header(h) == norm_key:
+                        row[h_idx] = str(value) if value is not None else ''
 
             rows_to_add.append(row)
 
@@ -421,6 +422,9 @@ class GoogleSheetsManager:
             end_col_letter = self._col_num_to_letter(len(headers))
             range_name = f'A{next_row}:{end_col_letter}{next_row + len(rows_to_add) - 1}'
             worksheet.update(range_name, rows_to_add, value_input_option='USER_ENTERED')
+
+            # 기존 행의 서식을 새 행에 복사 (10행 기준으로 서식 적용 고정)
+            self._copy_row_format(worksheet, 10, next_row, len(rows_to_add), len(headers))
 
             # 전역함수 열의 10행 이후 데이터 삭제
             standard_header_mapping = create_header_mapping(headers, sheet_type)
@@ -458,6 +462,50 @@ class GoogleSheetsManager:
                 processed = end_idx
                 message = f"데이터 저장 중... ({processed}/{total_items})"
                 progress_callback(processed, total_items, message)
+
+    def _copy_row_format(self, worksheet, source_row: int, target_start_row: int,
+                         num_rows: int, num_cols: int):
+        """
+        기존 행의 서식을 새 행들에 복사
+
+        Args:
+            worksheet: 워크시트 객체
+            source_row: 복사할 원본 행 번호 (1부터 시작)
+            target_start_row: 붙여넣을 시작 행 번호 (1부터 시작)
+            num_rows: 붙여넣을 행 수
+            num_cols: 복사할 열 수
+        """
+        try:
+            # repeatCell을 사용하여 서식 복사
+            request = {
+                "copyPaste": {
+                    "source": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": source_row - 1,  # 0-based index
+                        "endRowIndex": source_row,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": num_cols
+                    },
+                    "destination": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": target_start_row - 1,  # 0-based index
+                        "endRowIndex": target_start_row + num_rows,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": num_cols
+                    },
+                    "pasteType": "PASTE_FORMAT",  # 서식만 복사
+                    "pasteOrientation": "NORMAL"
+                }
+            }
+
+            # 배치 업데이트 실행
+            body = {"requests": [request]}
+            worksheet.spreadsheet.batch_update(body)
+            import time
+            time.sleep(0.1)  # API 호출 간 딜레이
+
+        except Exception as e:
+            print(f"[경고] 서식 복사 실패: {str(e)}")
 
     def _col_num_to_letter(self, col_num: int) -> str:
         """
@@ -1347,12 +1395,13 @@ class GoogleSheetsManager:
             # 헤더 매칭
             header_mapping, _ = self.create_header_mapping(headers, list(filtered_data.keys()))
 
-            # 행 데이터 생성 (모든 필드를 업데이트, 채널명 포함)
+            # 행 데이터 생성 (모든 필드를 업데이트, 지능형 정규화 매칭 적용)
             row_data = [''] * len(headers)
             for key, value in filtered_data.items():
-                if key in header_mapping:
-                    col_idx = header_mapping[key] - 1
-                    row_data[col_idx] = str(value) if value is not None else ''
+                norm_key = normalize_header(key)
+                for h_idx, h in enumerate(headers):
+                    if normalize_header(h) == norm_key:
+                        row_data[h_idx] = str(value) if value is not None else ''
 
             # 업데이트 범위 추가
             end_col_letter = self._col_num_to_letter(len(headers))

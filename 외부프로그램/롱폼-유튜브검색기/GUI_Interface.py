@@ -460,15 +460,16 @@ class GoogleSheetsManager:
         last_row = self.get_last_row(sheet_name, start_row)
         next_row = last_row + 1
 
-        # 데이터를 행 단위로 변환 (필터링된 데이터 사용)
+        # 데이터를 행 단위로 변환 (지능형 정규화 매칭 적용)
         rows_to_add = []
         for data in filtered_data_list:
             row = [''] * len(headers)  # 빈 행 초기화 (새 헤더 포함)
 
             for key, value in data.items():
-                if key in header_mapping:
-                    col_idx = header_mapping[key] - 1  # 0-based index
-                    row[col_idx] = str(value) if value is not None else ''
+                norm_key = normalize_header(key)
+                for h_idx, h in enumerate(headers):
+                    if normalize_header(h) == norm_key:
+                        row[h_idx] = str(value) if value is not None else ''
 
             rows_to_add.append(row)
 
@@ -486,9 +487,8 @@ class GoogleSheetsManager:
             self._retry_on_rate_limit(worksheet.update, range_name, rows_to_add, value_input_option='USER_ENTERED')
             time.sleep(0.1)  # API 호출 간 딜레이
 
-            # 기존 행의 서식을 새 행에 복사 (마지막 데이터 행 기준)
-            if last_row >= start_row:  # 기존 데이터가 있는 경우에만
-                self._copy_row_format(worksheet, last_row, next_row, len(rows_to_add), len(headers))
+            # 기존 행의 서식을 새 행에 복사 (10행 기준으로 서식 적용 고정)
+            self._copy_row_format(worksheet, 10, next_row, len(rows_to_add), len(headers))
 
             # 전역함수 열의 10행 이후 데이터 삭제
             standard_header_mapping = create_header_mapping(headers, sheet_type)
@@ -1495,12 +1495,13 @@ class GoogleSheetsManager:
             # 헤더 매칭
             header_mapping, _ = self.create_header_mapping(headers, list(filtered_data.keys()))
 
-            # 행 데이터 생성 (모든 필드를 업데이트, 채널명 포함)
+            # 행 데이터 생성 (모든 필드를 업데이트, 지능형 정규화 매칭 적용)
             row_data = [''] * len(headers)
             for key, value in filtered_data.items():
-                if key in header_mapping:
-                    col_idx = header_mapping[key] - 1
-                    row_data[col_idx] = str(value) if value is not None else ''
+                norm_key = normalize_header(key)
+                for h_idx, h in enumerate(headers):
+                    if normalize_header(h) == norm_key:
+                        row_data[h_idx] = str(value) if value is not None else ''
 
             # 업데이트 범위 추가
             end_col_letter = self._col_num_to_letter(len(headers))

@@ -96,83 +96,130 @@ class YouTubeSearchAPI:
 
     def search_videos(self, keyword: str, max_results: int = 50,
                      order: str = 'relevance', video_duration: str = None,
-                     published_after: datetime = None) -> tuple:
+                     published_after: datetime = None,
+                     search_country: str = '한국',
+                     exclude_country: bool = False,
+                     only_country: bool = False,
+                     db_cache: dict = None) -> tuple:
         """
-        키워드로 YouTube 비디오 검색
-
-        Args:
-            keyword: 검색 키워드
-            max_results: 최대 결과 수 (기본 50, 최대 50)
-            order: 정렬 순서 (relevance, date, rating, viewCount, title)
-            video_duration: 비디오 길이 필터 (short, medium, long)
-            published_after: 이후 게시된 비디오만 (datetime 객체)
-
-        Returns:
-            (검색된 비디오 정보 리스트, API 사용 통계 딕셔너리)
+        키워드로 YouTube 비디오 검색 (국가 필터링, 당일 캐싱 스킵 및 페이지네이션 지원)
         """
         if not self.youtube:
             raise Exception("YouTube API가 초기화되지 않았습니다. authenticate_oauth() 또는 authenticate_api_key()를 먼저 호출하세요.")
 
-        # API 호출 추적 초기화
+        if db_cache is None:
+            db_cache = {}
+
+        COUNTRY_ISO_MAP = {
+            '한국': 'KR', '미국': 'US', '일본': 'JP', '인도네시아': 'ID', '베트남': 'VN',
+            '태국': 'TH', '인도': 'IN', '대만': 'TW', '브라질': 'BR', '멕시코': 'MX',
+            '필리핀': 'PH', '러시아': 'RU', '영국': 'GB', '프랑스': 'FR', '독일': 'DE', '캐나다': 'CA'
+        }
+        target_iso = COUNTRY_ISO_MAP.get(search_country, 'KR').upper()
+
         api_calls = 0
         quota_cost = 0
-
-        search_params = {
-            'part': 'id,snippet',
-            'q': keyword,
-            'type': 'video',
-            'maxResults': min(max_results, 50),
-            'order': order,
-            'regionCode': 'KR'
-        }
-
-        if video_duration:
-            search_params['videoDuration'] = video_duration
-
-        if published_after:
-            search_params['publishedAfter'] = published_after.isoformat() + 'Z'
-
-        # 검색 실행 (비용: 100)
-        search_response = self.youtube.search().list(**search_params).execute()
-        api_calls += 1
-        quota_cost += 100
-
-        video_ids = []
-        for item in search_response.get('items', []):
-            if item['id']['kind'] == 'youtube#video':
-                video_ids.append(item['id']['videoId'])
-
-        if not video_ids:
-            stats = {
-                'api_calls': api_calls,
-                'quota_cost': quota_cost,
-                'quota_percent': round((quota_cost / self.DAILY_QUOTA) * 100, 2)
-            }
-            return [], stats
-
-        # 비디오 상세 정보 가져오기 (비용: 1)
-        videos_response = self.youtube.videos().list(
-            part='snippet,contentDetails,statistics,status',
-            id=','.join(video_ids)
-        ).execute()
-        api_calls += 1
-        quota_cost += 1
-
-        # 고유 채널 ID 수집
-        unique_channels = set()
-        for video in videos_response.get('items', []):
-            unique_channels.add(video['snippet']['channelId'])
-
         results = []
-        for video in videos_response.get('items', []):
-            results.append(self._extract_video_data(video, keyword))
+        unique_channels = set()
+        
+        next_page_token = None
+        total_scanned = 0
+        max_scan_limit = 500 # 무한 루프 및 쿼터 과다 소모 차단 안전 한도
 
-        # 채널 정보 조회 비용 추가 (비용: 1 × 고유 채널 수)
-        # get_channel_info가 호출된 횟수만큼
-        quota_cost += len(unique_channels)
-        api_calls += len(unique_channels)
+        while len(results) < max_results and total_scanned < max_scan_limit:
+            search_params = {
+                'part': 'id,snippet',
+                'q': keyword,
+                'type': 'video',
+                'maxResults': 50,
+                'order': order,
+                'regionCode': 'KR'
+            }
+            if next_page_token:
+                search_params['pageToken'] = next_page_token
+            if video_duration:
+                search_params['videoDuration'] = video_duration
+            if published_after:
+                search_params['publishedAfter'] = published_after.isoformat() + 'Z'
 
-        # 쿼터 사용량 업데이트
+            # 검색 호출 (비용 100 pts)
+            search_response = self.youtube.search().list(**search_params).execute()
+            api_calls += 1
+            quota_cost += 100
+
+            items = search_response.get('items', [])
+            if not items:
+                break
+                
+            total_scanned += len(items)
+            next_page_token = search_response.get('nextPageToken')
+
+            # 당일 수집 캐시 조회 및 신규 영상 분류
+            pending_video_ids = []
+            
+            for item in items:
+                if item['id']['kind'] != 'youtube#video':
+                    continue
+                v_id = item['id']['videoId']
+                
+                # 당일 수집된 캐시 데이터 존재 확인
+                if v_id in db_cache:
+                    cached_video = db_cache[v_id]
+                    # 캐시 영상의 채널 국가 필터링 체크
+                    c_country = str(cached_video.get('채널국가') or '').strip().upper()
+                    
+                    if exclude_country and c_country == target_iso:
+                        continue
+                    if only_country and c_country != target_iso:
+                        continue
+                        
+                    # 필터 통과 시 캐시 데이터를 결과에 바로 추가 (API 사용 0)
+                    cached_video['검색 키워드'] = keyword
+                    results.append(cached_video)
+                else:
+                    pending_video_ids.append(v_id)
+
+            # 신규 수집 필요 비디오 상세 정보 및 채널 수집 진행
+            if pending_video_ids:
+                # 50개 단위 배치 조회
+                for i in range(0, len(pending_video_ids), 50):
+                    batch_ids = pending_video_ids[i:i+50]
+                    videos_response = self.youtube.videos().list(
+                        part='snippet,contentDetails,statistics,status',
+                        id=','.join(batch_ids)
+                    ).execute()
+                    api_calls += 1
+                    quota_cost += 1 # videos.list 비용: 1 pts
+
+                    video_items = videos_response.get('items', [])
+                    for video in video_items:
+                        v_id = video['id']
+                        snippet = video['snippet']
+                        c_id = snippet['channelId']
+
+                        # 채널 상세 정보 획득 (비비디 국가 필터 검사용)
+                        channel_info = self.get_channel_info(c_id)
+                        api_calls += 1
+                        quota_cost += 1 # channels.list 비용: 1 pts
+                        unique_channels.add(c_id)
+
+                        c_country = str(channel_info.get('channel_country') or '').strip().upper()
+                        
+                        # 신규 영상 국가 필터링 체크
+                        if exclude_country and c_country == target_iso:
+                            continue
+                        if only_country and c_country != target_iso:
+                            continue
+
+                        # 필터 통과 시 상세 파싱 진행 (중복 API 제거를 위해 channel_info 주입)
+                        video_data = self._extract_video_data(video, keyword, channel_info)
+                        results.append(video_data)
+
+            if not next_page_token:
+                break
+
+        # 결과 개수 슬라이싱
+        results = results[:max_results]
         self.quota_used += quota_cost
 
         stats = {
@@ -181,7 +228,6 @@ class YouTubeSearchAPI:
             'quota_percent': round((quota_cost / self.DAILY_QUOTA) * 100, 2),
             'unique_channels': len(unique_channels)
         }
-
         return results, stats
 
     def get_channel_info(self, channel_id: str) -> Dict:
@@ -219,13 +265,14 @@ class YouTubeSearchAPI:
             'channel_link': f"https://www.youtube.com/channel/{channel_id}"
         }
 
-    def _extract_video_data(self, video: Dict, keyword: str) -> Dict:
+    def _extract_video_data(self, video: Dict, keyword: str, channel_info: Dict = None) -> Dict:
         """
         YouTube API 응답에서 필요한 데이터 추출
 
         Args:
             video: YouTube API videos().list() 응답 아이템
             keyword: 검색 키워드
+            channel_info: 이미 조회된 채널 정보 딕셔너리 (선택사항)
 
         Returns:
             추출된 비디오 데이터
@@ -236,7 +283,8 @@ class YouTubeSearchAPI:
         content_details = video.get('contentDetails', {})
 
         # 채널 정보 조회
-        channel_info = self.get_channel_info(snippet['channelId'])
+        if channel_info is None:
+            channel_info = self.get_channel_info(snippet['channelId'])
 
         # 비디오 길이 파싱 (ISO 8601 duration)
         duration = content_details.get('duration', 'PT0S')

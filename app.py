@@ -3,8 +3,23 @@ import sys
 import time
 import streamlit.components.v1 as components
 import json
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import sqlite3
 import logging
+
+# Streamlit deprecation warning 차단 필터
+class StreamlitWarningFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        if "use_container_width" in msg or "st.components.v1.html" in msg or "st.iframe" in msg:
+            return False
+        return True
+
+# streamlit 전체 로거 및 그 하위 로거들에 필터 적용
+st_logger = logging.getLogger("streamlit")
+st_logger.addFilter(StreamlitWarningFilter())
 from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
@@ -31,6 +46,14 @@ from logger_config import setup_logger, cleanup_old_logs
 logger = setup_logger('crawler')
 
 # 공통 유틸 및 크롤러 기동 엔진 임포트
+import importlib
+import modules.utils
+import modules.crawler_runner
+import app_utils
+importlib.reload(modules.utils)
+importlib.reload(modules.crawler_runner)
+importlib.reload(app_utils)
+
 from app_utils import get_actual_ranking_date_str, standardize_dataframe_types, load_and_standardize_csv
 from modules.crawler_runner import run_crawling_by_criteria, find_existing_batch_file_runner
 def find_existing_batch_file(base_dir, target_type, category, country, period, criteria=None, ranking_date=None):
@@ -222,12 +245,15 @@ def load_settings():
         # 탭 6 (유튜브 검색기)
         "ext_search_type": "롱폼 유튜브 검색기",
         "ext_search_keyword": "",
-        "ext_search_limit": 20,
+        "ext_search_limit": 50,
         "ext_search_order": "relevance",
         "ext_search_duration": "any",
         "ext_search_sheet_url": "https://docs.google.com/spreadsheets/d/15VuwgxcfjWUGzlQIstSNcK5SnTQZtaEi3XRfyffPxEE/edit",
         "ext_search_sheet_name": "키워드 검색결과",
-        "ext_search_creds": "google_service_key/service-account-key.json"
+        "ext_search_creds": "google_service_key/service-account-key.json",
+        "ext_search_country": "한국",
+        "ext_exclude_country": False,
+        "ext_only_country": False
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -321,6 +347,9 @@ try:
             st.sidebar.info("과거 사용량 이력 정보가 없습니다.")
 except Exception as q_err:
     st.sidebar.error(f"Quota 로드 실패: {q_err}")
+
+if st.sidebar.button("🔄 사이드바 정보 새로고침", key="sidebar_refresh_btn", use_container_width=True):
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.info("개발자: YouTube Crawler Pro Team\n버전: v3.0 (Streamlit)")
@@ -854,54 +883,73 @@ with tabs[1]:
         if not selected_period:
             selected_period = st.session_state['dash_period'] = '일간'
             
-        # 데이터가 있는 날짜 목록 가져오기 (필터 조건 반영)
+        # 1. 3열 구분/레이아웃/정렬 위젯을 먼저 렌더링하여 항상 조작 가능하게 보장
+        col_dash1, col_dash2, col_dash3 = st.columns([1, 1, 1])
+        with col_dash1:
+            # 구분 선택
+            type_options = ["📱 쇼츠 (Shorts)", "📺 일반 영상 (Video)", "🏢 채널 (Channel)"]
+            type_val = saved_ui.get('crawl_dash_type', "📱 쇼츠 (Shorts)")
+            type_idx = type_options.index(type_val) if type_val in type_options else 0
+            type_tab = st.radio("데이터 구분", type_options, index=type_idx, key="crawl_dash_type", horizontal=True)
+        with col_dash2:
+            # 레이아웃 선택
+            layout_options = ["캐러셀형 (카드 그리드)", "리스트형 (썸네일 포함)"]
+            layout_val = saved_ui.get('crawl_dash_layout', "캐러셀형 (카드 그리드)")
+            layout_idx = layout_options.index(layout_val) if layout_val in layout_options else 0
+            layout_style = st.radio("레이아웃 스타일", layout_options, index=layout_idx, key="crawl_dash_layout", horizontal=True)
+        with col_dash3:
+            # 정렬 순서 선택
+            sort_order_opts = ["높은 순위순", "낮은 순위순", "지표 높은순", "지표 낮은순", "비율 높은순", "비율 낮은순"]
+            sort_order_val = saved_ui.get('dash_sort_order', "높은 순위순")
+            sort_order_idx = sort_order_opts.index(sort_order_val) if sort_order_val in sort_order_opts else 0
+            sort_order = st.selectbox("정렬 순서", sort_order_opts, index=sort_order_idx, key="dash_sort_order")
+            
+        # 2. 선택된 구분을 바탕으로 해당 데이터 조건이 있는 날짜 리스트 조회 (국가, 기간, 수집기준 필터 조건 반영)
         active_dates = []
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            query = """
-                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM shorts_rank WHERE country = ? AND period = ?
-                UNION
-                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM videos_rank WHERE country = ? AND period = ?
-                UNION
-                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val FROM channels_rank WHERE country = ? AND period = ?
+            if "쇼츠" in type_tab:
+                table_name = "shorts_rank"
+            elif "일반 영상" in type_tab:
+                table_name = "videos_rank"
+            else:
+                table_name = "channels_rank"
+                
+            query = f"""
+                SELECT DISTINCT substr(crawled_at, 1, 10) as date_val 
+                FROM {table_name} 
+                WHERE country = ? AND period = ? AND criteria = ?
                 ORDER BY date_val DESC
             """
-            cursor.execute(query, (selected_country, selected_period, selected_country, selected_period, selected_country, selected_period))
+            cursor.execute(query, (selected_country, selected_period, selected_criteria))
             active_dates = [r[0] for r in cursor.fetchall() if r[0]]
             conn.close()
         except Exception as date_err:
             st.error(f"수집 날짜 조회 오류: {date_err}")
             
-        if not active_dates:
-            st.info(f"💡 선택된 조건(국가: '{selected_country}', 기간: '{selected_period}')으로 수집된 크롤링 데이터가 존재하지 않습니다. 유튜브 크롤러 탭에서 먼저 수집을 진행해 주세요.")
-        else:
-            # 날짜 선택 복원
-            default_dash_date = saved_ui.get("crawl_dash_date", "")
-            date_idx = active_dates.index(default_dash_date) if default_dash_date in active_dates else 0
+        # 3. 날짜 선택 selectbox 렌더링 및 세션 자동 이동 보정
+        selected_date = None
+        if active_dates:
+            # 세션에 저장된 날짜가 현재 조건의 날짜 목록에 없다면, 가장 최신 날짜로 강제 보정
+            current_dash_date = st.session_state.get("crawl_dash_date", "")
+            if current_dash_date not in active_dates:
+                st.session_state["crawl_dash_date"] = active_dates[0]
+                
+            try:
+                date_idx = active_dates.index(st.session_state["crawl_dash_date"])
+            except ValueError:
+                date_idx = 0
+                
             selected_date = st.selectbox("수집 날짜 선택", active_dates, index=date_idx, key="crawl_dash_date")
+        else:
+            st.selectbox("수집 날짜 선택", ["데이터 없음"], disabled=True, key="crawl_dash_date")
             
-            col_dash1, col_dash2, col_dash3 = st.columns([1, 1, 1])
-            with col_dash1:
-                # 구분 선택
-                type_options = ["📱 쇼츠 (Shorts)", "📺 일반 영상 (Video)", "🏢 채널 (Channel)"]
-                type_val = saved_ui.get('crawl_dash_type', "📱 쇼츠 (Shorts)")
-                type_idx = type_options.index(type_val) if type_val in type_options else 0
-                type_tab = st.radio("데이터 구분", type_options, index=type_idx, key="crawl_dash_type", horizontal=True)
-            with col_dash2:
-                # 레이아웃 선택
-                layout_options = ["캐러셀형 (카드 그리드)", "리스트형 (썸네일 포함)"]
-                layout_val = saved_ui.get('crawl_dash_layout', "캐러셀형 (카드 그리드)")
-                layout_idx = layout_options.index(layout_val) if layout_val in layout_options else 0
-                layout_style = st.radio("레이아웃 스타일", layout_options, index=layout_idx, key="crawl_dash_layout", horizontal=True)
-            with col_dash3:
-                # 정렬 순서 선택
-                sort_order_opts = ["높은 순위순", "낮은 순위순", "지표 높은순", "지표 낮은순", "비율 높은순", "비율 낮은순"]
-                sort_order_val = saved_ui.get('dash_sort_order', "높은 순위순")
-                sort_order_idx = sort_order_opts.index(sort_order_val) if sort_order_val in sort_order_opts else 0
-                sort_order = st.selectbox("정렬 순서", sort_order_opts, index=sort_order_idx, key="dash_sort_order")
-            
+        # 4. 데이터가 없는 경우 안내창 표출 후 중단
+        if not active_dates:
+            st.info(f"💡 선택된 조건(구분: '{type_tab}', 기준: '{selected_criteria}', 국가: '{selected_country}', 기간: '{selected_period}')으로 수집된 크롤링 데이터가 존재하지 않습니다. 유튜브 크롤러 탭에서 먼저 수집을 진행해 주세요.")
+        else:
             # 해당 날짜의 데이터를 국가/기간 필터 적용하여 로드
             conn = get_db_connection()
             df_dash = pd.DataFrame()
@@ -1689,17 +1737,24 @@ with tabs[1]:
                             </div>
                             <div class="copy-modal-body">
                                 <div>
-                                    <div class="copy-item-label">영상 제목 (Video Title)</div>
+                                    <div class="copy-item-label">🎬 영상 제목 (Video Title)</div>
                                     <div class="copy-code-container">
                                         <span id="copyModalTitleText"></span>
                                         <button class="copy-code-btn" onclick="window.copyModalField('copyModalTitleText', this)">복사 📋</button>
                                     </div>
                                 </div>
                                 <div>
-                                    <div class="copy-item-label">채널명 (Channel Name)</div>
+                                    <div class="copy-item-label">👤 채널명 (Channel Name)</div>
                                     <div class="copy-code-container">
                                         <span id="copyModalChannelText"></span>
                                         <button class="copy-code-btn" onclick="window.copyModalField('copyModalChannelText', this)">복사 📋</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="copy-item-label">📋 채널 + 영상제목 (Channel - Title)</div>
+                                    <div class="copy-code-container">
+                                        <span id="copyModalCombinedText"></span>
+                                        <button class="copy-code-btn" onclick="window.copyModalField('copyModalCombinedText', this)">복사 📋</button>
                                     </div>
                                 </div>
                             </div>
@@ -1738,10 +1793,12 @@ with tabs[1]:
                                 const overlay = parentDoc.getElementById('copyModalOverlay');
                                 const titleText = parentDoc.getElementById('copyModalTitleText');
                                 const channelText = parentDoc.getElementById('copyModalChannelText');
+                                const combinedText = parentDoc.getElementById('copyModalCombinedText');
                                 
-                                if (overlay && titleText && channelText) {
+                                if (overlay && titleText && channelText && combinedText) {
                                     titleText.textContent = title;
                                     channelText.textContent = channel;
+                                    combinedText.textContent = `${channel} - ${title}`;
                                     
                                     // 복사 버튼 상태 초기화
                                     const copyBtns = overlay.querySelectorAll('.copy-code-btn');
@@ -2502,18 +2559,101 @@ def run_extractor_work(ext_state, trans_type, sheet_url, sheet_name, mode_val, l
         ext_state.log_history.append(f"❌ 작업 도중 예외 발생: {work_err}")
 
 
-def run_search_work(search_state, search_type, keyword, limit, order, duration, sheet_url, sheet_name, creds_path):
+def run_search_work(search_state, search_type, keyword, limit, order, duration, sheet_url, sheet_name, creds_path, search_country, exclude_country, only_country):
     """유튜브 키워드 검색 백그라운드 스레드 작업 실행 함수"""
     import os
     import sys
     import time
     from datetime import datetime
+    import traceback
     
+    def log_and_append(msg, level="info"):
+        search_state.log_history.append(msg)
+        if level == "info":
+            logger.info(msg)
+        elif level == "warning":
+            logger.warning(msg)
+        elif level == "error":
+            logger.error(msg)
+        elif level == "debug":
+            logger.debug(msg)
+
+    # 예외 상황 및 UnboundLocalError 방지를 위해 주요 변수 사전 초기화
+    results = []
+    inserted_count = 0
+    updated_count = 0
+    next_row = 10
+    sheet_success = False  # 구글 시트 저장 완료 상태 플래그
+
     # 자격증명 경로 절대경로 보정 (공유 키 지원용)
     if creds_path:
         creds_path = os.path.abspath(creds_path)
         
     current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 당일 중복 수집 방지를 위한 DB 캐시 및 역매핑 빌드
+    today_date_str = datetime.now().strftime('%Y-%m-%d')
+    db_cache = {}
+    
+    DB_TO_KR_MAP = {
+        'video_id': '영상 ID',
+        'upload_date': '영상 업로드날짜',
+        'crawl_date': '수집날짜',
+        'keyword': '검색 키워드',
+        'video_link': '영상 링크',
+        'title': '제목',
+        'channel_name': '채널명',
+        'views': '조회수',
+        'video_length': '영상길이',
+        'likes': '좋아요 수',
+        'comments': '댓글수',
+        'subscribers': '구독자수',
+        'sub_to_view_ratio': '구독자 대비 조회수 배율',
+        'view_to_like_ratio': '조회수 대비 좋아요',
+        'view_to_comment_ratio': '조회수 대비 댓글',
+        'channel_name_33': '33. 채널명',
+        'channel_country': '채널국가',
+        'channel_id': '채널 ID',
+        'channel_link': '채널링크',
+        'channel_description': '채널 디스크립션',
+        'channel_handle': '채널 핸들',
+        'thumbnail_link': '썸네일 링크',
+        'video_count': '영상갯수',
+        'channel_total_views': '채널 전체 조회수',
+        'avg_views_per_video': '영상당 평균 조회수',
+        'channel_published_at': '채널 개설일',
+        'category_id': '카테고리 ID',
+        'video_description': '디스크립션',
+        'description_len': '디스크립션 텍스트 수',
+        'has_hashtags': '해시태그 유무',
+        'thumbnail_address': '썸네일 이미지주소'
+    }
+
+    try:
+        import sqlite3
+        conn = sqlite3.connect(os.path.join(current_dir, DB_PATH))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(sheet_videos)")
+        cols = [col[1] for col in cursor.fetchall()]
+        
+        cursor.execute("SELECT * FROM sheet_videos WHERE crawl_date LIKE ?", (f"{today_date_str}%",))
+        for row in cursor.fetchall():
+            r_dict = dict(row)
+            v_id = r_dict.get('video_id')
+            if v_id:
+                kr_row = {}
+                for db_col, kr_key in DB_TO_KR_MAP.items():
+                    if db_col in r_dict:
+                        kr_row[kr_key] = r_dict[db_col]
+                if '채널명' in kr_row and '33. 채널명' not in kr_row:
+                    kr_row['33. 채널명'] = kr_row['채널명']
+                db_cache[v_id] = kr_row
+        conn.close()
+        log_and_append(f"ℹ─ 로컬 DB 당일 수집 캐시 로드 완료: {len(db_cache)}개 영상 캐싱됨 (중복 수집 스킵 보장)")
+    except Exception as cache_err:
+        db_cache = {}
+        logger.error(f"당일 캐시 빌드 실패 (API 생략 없이 전체 API 조회 실행): {cache_err}", exc_info=True)
     if search_type == "롱폼 유튜브 검색기":
         project_dir = os.path.join(current_dir, "외부프로그램", "롱폼-유튜브검색기")
     else:
@@ -2523,15 +2663,24 @@ def run_search_work(search_state, search_type, keyword, limit, order, duration, 
     main_file = os.path.join(project_dir, "Main_Search.py")
     
     try:
+        log_and_append("🚀 유튜브 검색 스레드 가동 및 모듈 격리 로드 시도...")
+        
         # 격리 모듈 동적 로드
         ext_gui = load_isolated_module("ext_search_gui_module", gui_file, project_dir)
         ext_main = load_isolated_module("ext_search_main_module", main_file, project_dir)
         
-        search_state.log_history.append("🔐 구글 서비스 계정 인증 시도 중...")
+        # Monkey Patch: 격리 파일 차이로 인해 _retry_on_rate_limit가 누락될 경우를 대비해 클래스 레벨에서 폴백 바인딩
+        if hasattr(ext_gui, 'GoogleSheetsManager') and not hasattr(ext_gui.GoogleSheetsManager, '_retry_on_rate_limit'):
+            def _retry_on_rate_limit(self, func, *args, **kwargs):
+                return func(*args, **kwargs)
+            ext_gui.GoogleSheetsManager._retry_on_rate_limit = _retry_on_rate_limit
+            log_and_append("🛠️ GoogleSheetsManager._retry_on_rate_limit 몽키 패치 적용 완료 (안전성 강화)")
+
+        log_and_append("🔐 구글 서비스 계정 인증 시도 중...")
         
         # 1. GoogleSheetsManager 생성 및 인증
         sheets_manager = ext_gui.GoogleSheetsManager(creds_path, sheet_url)
-        search_state.log_history.append("✓ 구글 시트 gspread 인증 완료")
+        log_and_append("✓ 구글 시트 gspread 인증 완료")
         
         # 2. YouTube Data API 인증
         client_secret_file = None
@@ -2545,48 +2694,55 @@ def run_search_work(search_state, search_type, keyword, limit, order, duration, 
         youtube_api = ext_main.YouTubeSearchAPI()
         
         if client_secret_file:
-            search_state.log_history.append("🔑 OAuth2 client_secret 파일 발견. OAuth 인증 실행 중...")
+            log_and_append("🔑 OAuth2 client_secret 파일 발견. OAuth 인증 실행 중...")
             youtube_api.authenticate_oauth(client_secret_file)
         else:
             api_key_file = os.path.join(secret_dir, "api_key.txt")
             if os.path.exists(api_key_file):
-                search_state.log_history.append("🔑 API Key 텍스트 발견. Key 인증 실행 중...")
+                log_and_append("🔑 API Key 텍스트 발견. Key 인증 실행 중...")
                 with open(api_key_file, "r") as f:
                     api_key = f.read().strip()
                 youtube_api.authenticate_api_key(api_key)
             else:
                 raise FileNotFoundError("GCP 연동용 client_secret JSON 또는 api_key.txt를 google_service_key 폴더 아래에서 찾을 수 없습니다.")
                 
-        search_state.log_history.append("✓ YouTube Data API v3 인증 완료")
+        log_and_append("✓ YouTube Data API v3 인증 완료")
         
-        # 중복 체크 1단계: 검색 전 DB에 존재하는 영상 ID 목록 미리 획득
+        # 중복 체크 1단계: 검색 전 DB에 존재하는 영상 ID 목록 및 오더 미리 획득
         try:
             import sqlite3
             conn = sqlite3.connect(os.path.join(current_dir, DB_PATH))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT video_id FROM sheet_videos")
-            existing_video_ids = {r[0] for r in cursor.fetchall() if r[0]}
+            cursor.execute("SELECT video_id, original_row_order FROM sheet_videos WHERE tab_name = '키워드 검색결과'")
+            db_existing_orders = {r[0]: r[1] for r in cursor.fetchall() if r[0]}
             conn.close()
-            search_state.log_history.append(f"ℹ️ 로컬 DB 내 기존 영상 ID {len(existing_video_ids)}개 확인 완료 (중복 감지 활성화)")
+            log_and_append(f"ℹ️ 로컬 DB 내 기존 '키워드 검색결과' 영상 {len(db_existing_orders)}개 매핑 확인 완료")
         except Exception as db_init_err:
-            existing_video_ids = set()
-            search_state.log_history.append(f"⚠️ 기존 영상 ID 확인 실패 (기본값 처리): {db_init_err}")
+            db_existing_orders = {}
+            logger.error(f"⚠️ 기존 영상 ID 확인 실패 (기본값 처리): {db_init_err}", exc_info=True)
+            log_and_append(f"⚠️ 기존 영상 ID 확인 실패 (기본값 처리): {db_init_err}", "warning")
 
         # 유튜브 검색 시 타겟 탭을 무조건 '키워드 검색결과'로 강제
         sheet_name = "키워드 검색결과"
-        search_state.log_history.append(f"🔍 유튜브 검색 실행: 키워드='{keyword}', 최대={limit}개, 정렬={order}, 길이={duration}")
+        log_and_append(f"🔍 [API 요청] 유튜브 검색 실행: 키워드='{keyword}', 최대={limit}개, 정렬={order}, 길이={duration}")
         
         # 검색 실행
+        start_time = time.time()
         results, stats = youtube_api.search_videos(
             keyword=keyword,
             max_results=limit,
             order=order,
-            video_duration=None if duration == 'any' else duration
+            video_duration=None if duration == 'any' else duration,
+            search_country=search_country,
+            exclude_country=exclude_country,
+            only_country=only_country,
+            db_cache=db_cache
         )
+        elapsed_time = time.time() - start_time
         
         if not results:
-            search_state.log_history.append("⚠️ 조건에 부합하는 유튜브 검색 결과가 없습니다.")
+            log_and_append("⚠️ 조건에 부합하는 유튜브 검색 결과가 없습니다.", "warning")
             search_state.is_running = False
             search_state.result = {
                 "status": "warning",
@@ -2594,59 +2750,190 @@ def run_search_work(search_state, search_type, keyword, limit, order, duration, 
             }
             return
             
-        search_state.log_history.append(f"✓ 검색 완료! {len(results)}개 영상 획득 (Quota 소모: {stats.get('quota_cost')} pts)")
+        log_and_append(f"✓ [API 응답 수신 완료] {len(results)}개 영상 획득 (소요시간: {elapsed_time:.2f}초)")
+        log_and_append(f"   ├─ API 호출 횟수: {stats.get('api_calls')} 회")
+        log_and_append(f"   ├─ 총 할당량 소모: {stats.get('quota_cost')} pts (일일 제한의 {stats.get('quota_percent')}% 소모)")
+        log_and_append(f"   └─ 고유 채널 수: {stats.get('unique_channels', 0)} 개")
         
-        # 중복 체크 2단계: 신규 데이터 중복 제거 필터링
-        filtered_results = []
-        skipped_count = 0
-        for r in results:
-            v_id = r.get('영상 ID') or r.get('video_id')
-            if v_id and v_id in existing_video_ids:
-                skipped_count += 1
-                continue
-            filtered_results.append(r)
-            
-        if skipped_count > 0:
-            search_state.log_history.append(f"ℹ️ 기존 DB에 이미 존재하는 영상 {skipped_count}개를 제외(패스)했습니다.")
-            
-        if not filtered_results:
-            search_state.log_history.append("⚠️ 모든 검색 결과 영상이 이미 DB에 존재하여 저장을 패스합니다.")
-            search_state.is_running = False
-            search_state.result = {
-                "status": "success",
-                "msg": f"✓ 중복 제외 완료 (모든 결과 {len(results)}개가 이미 DB에 존재함)",
-                "data": []
-            }
-            return
-            
-        # 3. 구글 시트 저장
-        search_state.log_history.append(f"📝 구글 시트 '{sheet_name}' 탭에 벌크 데이터 추가 시작 (신규 {len(filtered_results)}개)...")
+        # 3. 구글 시트 및 DB Upsert 저장 프로세스
+        log_and_append(f"📝 [저장 단계 1/2] 구글 시트 '{sheet_name}' 탭 연동 및 중복 체크 분석 시작...")
         
-        def progress_cb(current, total, message):
-            search_state.log_history.append(f"  └> {message}")
+        path_added = False
+        try:
+            if project_dir not in sys.path:
+                sys.path.insert(0, project_dir)
+                path_added = True
+                
+            worksheet = sheets_manager.get_or_create_worksheet(sheet_name)
+            headers = sheets_manager.get_headers(sheet_name)
             
-        # 벌크 저장 (10행부터, 포맷 보존)
-        sheets_manager.bulk_append_data_in_batches(
-            sheet_name=sheet_name,
-            data_list=filtered_results,
-            batch_size=100,
-            start_row=10,
-            progress_callback=progress_cb
-        )
-        
+            # 62개 표준 헤더가 구성되어 있지 않은 경우 초기화
+            if not headers or len(headers) < 5:
+                log_and_append("ℹ─ 시트 헤더가 비어 있어 초기화를 진행합니다...")
+                sheets_manager.initialize_headers(sheet_name)
+                headers = sheets_manager.get_headers(sheet_name)
+                
+            # A열(영상 ID)의 모든 값을 가져와서 구글 시트 상의 video_id -> 행 번호 사전 빌드
+            col_a_values = sheets_manager._retry_on_rate_limit(worksheet.col_values, 1)
+            existing_sheet_rows = {}
+            start_row = 10
+            for idx, val in enumerate(col_a_values[start_row - 1:], start=start_row):
+                val_str = str(val).strip()
+                if val_str and val_str != "1. 영상 ID":
+                    existing_sheet_rows[val_str] = idx
+                    
+            log_and_append(f"ℹ─ 구글 시트 내 기존 저장된 영상 ID {len(existing_sheet_rows)}개 감지 완료")
+            
+            # 수식 열(자동 계산 열) 식별 및 데이터 작성 대상에서 제외
+            sheet_type = ext_gui.detect_sheet_type(headers)
+            if sheet_type is None:
+                sheet_type = ext_gui.guess_sheet_type_from_name(sheet_name)
+            if sheet_type is None:
+                from sheet_config import SheetType
+                sheet_type = SheetType.VIDEO_LIST
+                
+            from sheet_config import get_formula_columns
+            formula_columns = get_formula_columns(sheet_type)
+            excluded_headers = {ext_gui.normalize_header(col) for col in formula_columns}
+            
+            # 헤더 매칭 및 동적 열 추가 지원
+            data_keys = list(results[0].keys()) if results else []
+            header_mapping, unmatched_keys = sheets_manager.create_header_mapping(headers, data_keys)
+            
+            if unmatched_keys:
+                first_empty_col = len(headers) + 1
+                new_headers_added = []
+                for idx, key in enumerate(unmatched_keys):
+                    col_index = first_empty_col + idx
+                    header_mapping[key] = col_index
+                    headers.append(key)
+                    new_headers_added.append(key)
+                
+                required_cols = first_empty_col + len(new_headers_added) - 1
+                current_cols = worksheet.col_count
+                if required_cols > current_cols:
+                    worksheet.resize(cols=required_cols + 10)
+                    
+                if new_headers_added:
+                    start_col_letter = sheets_manager._col_num_to_letter(first_empty_col)
+                    end_col_letter = sheets_manager._col_num_to_letter(first_empty_col + len(new_headers_added) - 1)
+                    header_range = f'{start_col_letter}1:{end_col_letter}1'
+                    sheets_manager._retry_on_rate_limit(worksheet.update, header_range, [new_headers_added], value_input_option='USER_ENTERED')
+                    time.sleep(0.1)
+            
+            # 신규 데이터 추가와 기존 중복 데이터 업데이트 분류
+            updates_batch_requests = []
+            inserts_data = []
+            next_row = sheets_manager.get_last_row(sheet_name, start_row) + 1
+            
+            for idx, r in enumerate(results, 1):
+                # 영상 ID 추출
+                v_id = str(r.get('영상 ID') or r.get('video_id') or '').strip()
+                v_title = r.get('제목') or r.get('Video Title') or 'N/A'
+                if not v_id:
+                    continue
+                
+                # 수집날짜 세팅 보정
+                if '수집날짜' not in r and 'crawl_date' not in r:
+                    r['수집날짜'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                if '검색 키워드' not in r and 'keyword' not in r:
+                    r['검색 키워드'] = keyword
+                    
+                # 수식 열 제외 필터링
+                filtered_r = {}
+                for key, value in r.items():
+                    if ext_gui.normalize_header(key) not in excluded_headers:
+                        filtered_r[key] = value
+                        
+                # 2차원 리스트 행 데이터로 변환 (중복 채널명 등 다중 매핑 및 지능형 매칭 적용)
+                row_values = [''] * len(headers)
+                for key, value in filtered_r.items():
+                    norm_key = ext_gui.normalize_header(key)
+                    for h_idx, h in enumerate(headers):
+                        if ext_gui.normalize_header(h) == norm_key:
+                            row_values[h_idx] = str(value) if value is not None else ''
+                
+                # 중복 여부에 따라 데이터 분류 및 실시간 로깅
+                if v_id in existing_sheet_rows:
+                    target_row_num = existing_sheet_rows[v_id]
+                    end_col_letter = sheets_manager._col_num_to_letter(len(headers))
+                    range_name = f'A{target_row_num}:{end_col_letter}{target_row_num}'
+                    updates_batch_requests.append({
+                        'range': range_name,
+                        'values': [row_values]
+                    })
+                    r['original_row_order'] = target_row_num
+                    updated_count += 1
+                    log_and_append(f"   ├─ [{idx}/{len(results)}] 중복 매칭 감지(업데이트): 행={target_row_num} | ID={v_id} | {v_title[:30]}...")
+                else:
+                    inserts_data.append((row_values, next_row, r))
+                    r['original_row_order'] = next_row
+                    next_row += 1
+                    inserted_count += 1
+                    log_and_append(f"   ├─ [{idx}/{len(results)}] 신규 영상 감지(신규 추가): 행={next_row-1} | ID={v_id} | {v_title[:30]}...")
+                    
+            # 구글 시트에 업데이트 반영
+            if updates_batch_requests:
+                log_and_append(f"   ├─ [시트 업데이트] 기존 중복 영상 {updated_count}건 구글 시트 내 배치 업데이트 요청 중...")
+                res_update = sheets_manager._retry_on_rate_limit(worksheet.batch_update, updates_batch_requests)
+                log_and_append(f"   │  └─ 업데이트 API 완료: {str(res_update)[:100]}")
+                time.sleep(0.1)
+                
+            # 구글 시트에 신규 삽입 반영
+            if inserts_data:
+                log_and_append(f"   ├─ [시트 삽입] 신규 영상 {inserted_count}건 구글 시트 내 추가 요청 중...")
+                rows_to_insert = [item[0] for item in inserts_data]
+                insert_start_row = inserts_data[0][1]
+                
+                required_rows = insert_start_row + len(rows_to_insert) - 1
+                current_rows = worksheet.row_count
+                if required_rows > current_rows:
+                    worksheet.resize(rows=required_rows + 1000, cols=worksheet.col_count)
+                    
+                end_col_letter = sheets_manager._col_num_to_letter(len(headers))
+                range_name = f'A{insert_start_row}:{end_col_letter}{required_rows}'
+                res_insert = sheets_manager._retry_on_rate_limit(worksheet.update, range_name, rows_to_insert, value_input_option='USER_ENTERED')
+                log_and_append(f"   │  └─ 삽입 API 완료: {str(res_insert)[:100]}")
+                time.sleep(0.1)
+                
+                # 기존 행 서식 복사 적용 (10행 기준으로 서식 적용 고정)
+                sheets_manager._copy_row_format(worksheet, 10, insert_start_row, len(rows_to_insert), len(headers))
+                    
+            # 전역 수식 열 지우기 (구글 시트 엔진 계산 보존용)
+            standard_header_mapping = ext_gui.create_header_mapping(headers, sheet_type)
+            ext_gui.clear_formula_column_data(worksheet, standard_header_mapping, sheet_type)
+            log_and_append("✓ [시트 동기화 완료] 구글 시트 데이터 쓰기 및 수식 정리 완료")
+            sheet_success = True
+            
+        except Exception as sheet_err:
+            traceback.print_exc()
+            logger.error(f"검색 결과 구글 시트 저장 실패: {sheet_err}", exc_info=True)
+            log_and_append(f"⚠️ 구글 시트 반영 실패 (로컬 DB 적재는 계속 실행합니다): {sheet_err}", "error")
+            sheet_success = False
+        finally:
+            if path_added and project_dir in sys.path:
+                sys.path.remove(project_dir)
+                log_and_append("🛠️ sys.path 임시 복원 완료 (안전 격리 유지)")
+
         # 4. 로컬 DB 'sheet_videos' 에도 저장 (tab_name='키워드 검색결과')
-        search_state.log_history.append("💾 로컬 DB 'sheet_videos' 테이블 적재 및 통계 수식 자동 계산 중...")
+        log_and_append("💾 [저장 단계 2/2] 로컬 DB 'sheet_videos' 테이블 적재 및 통계 수식 자동 계산 중...")
         try:
             from modules.utils import match_db_column_by_header, calculate_sheet_video_metrics
             conn = sqlite3.connect(os.path.join(current_dir, DB_PATH))
             cursor = conn.cursor()
             
-            # DB 컬럼 조회
+            # DB 컬럼 조회 (딕셔너리/튜플/Row 타입에 모두 안전한 호환 파싱)
             cursor.execute("PRAGMA table_info(sheet_videos)")
-            db_cols = [col['name'] for col in cursor.fetchall()]
+            rows = cursor.fetchall()
+            db_cols = []
+            for col in rows:
+                if isinstance(col, (dict, sqlite3.Row)):
+                    db_cols.append(col['name'])
+                else:
+                    db_cols.append(col[1])
             
             inserted_db_count = 0
-            for idx, r in enumerate(filtered_results):
+            for idx, r in enumerate(results):
                 row_dict = {}
                 # 헤더명을 DB 컬럼명으로 동적 변환
                 for kr_header, val in r.items():
@@ -2659,7 +2946,15 @@ def run_search_work(search_state, search_type, keyword, limit, order, duration, 
                     continue
                     
                 row_dict['tab_name'] = sheet_name
-                row_dict['original_row_order'] = 10 + idx  # 10행부터 삽입되므로 오더 보정
+                
+                # 수집날짜 및 키워드 기본값 보정
+                if not row_dict.get('crawl_date'):
+                    row_dict['crawl_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                if not row_dict.get('keyword'):
+                    row_dict['keyword'] = keyword
+                    
+                # original_row_order 바인딩
+                row_dict['original_row_order'] = r.get('original_row_order', next_row + idx)
                 
                 # 파이썬 기반 통계 자동 계산
                 row_dict = calculate_sheet_video_metrics(row_dict)
@@ -2673,26 +2968,48 @@ def run_search_work(search_state, search_type, keyword, limit, order, duration, 
                 
             conn.commit()
             conn.close()
-            search_state.log_history.append(f"✓ 로컬 DB 'sheet_videos' ({sheet_name})에 {inserted_db_count}개 행 적재 완료")
+            log_and_append(f"✓ [DB 동기화 완료] 로컬 DB 'sheet_videos' ({sheet_name})에 {inserted_db_count}개 행 적재 완료")
         except Exception as db_save_err:
+            traceback.print_exc()
             logger.error(f"검색 결과 DB 저장 실패: {db_save_err}", exc_info=True)
-            search_state.log_history.append(f"⚠️ 로컬 DB 저장 중 실패 (구글 시트는 저장 완료): {db_save_err}")
+            log_and_append(f"⚠️ 로컬 DB 저장 중 실패: {db_save_err}", "error")
             
-        search_state.log_history.append("✓ 구글 시트 저장 및 수식 열 자동 보호 완료!")
+        log_and_append("✓ 구글 시트 및 로컬 DB 데이터 동기화 전체 완료!")
+        
+        # API Quota 사용량을 로컬 DB QuotaTracker에 누적 기록하여 실시간 동기화
+        try:
+            from modules.quota_tracker import QuotaTracker
+            q_tracker = QuotaTracker(os.path.join(current_dir, DB_PATH))
+            q_tracker.log_usage(endpoint='search.list', units=stats.get('quota_cost', 100))
+            log_and_append(f"🎫 QuotaTracker에 검색 소모량 {stats.get('quota_cost')} pts 누적 기록 완료")
+        except Exception as q_log_err:
+            logger.error(f"QuotaTracker 누적 기록 실패: {q_log_err}", exc_info=True)
+
         search_state.is_running = False
+        
+        # 구글 시트 저장 완료 여부에 따른 피드백 분기 및 상태 처리
+        if sheet_success:
+            status_tag = "success"
+            res_msg = f"✓ 검색 및 시트/DB 저장 완료: 총 {len(results)}개 항목 Upsert 완료 (신규 {inserted_count}개 추가, 중복 {updated_count}개 업데이트)"
+        else:
+            status_tag = "warning"
+            res_msg = f"⚠️ 검색 완료 및 DB 적재는 성공했으나, 구글 시트 쓰기 실패 (DB에 {len(results)}개 항목 Upsert 완료)"
+            
         search_state.result = {
-            "status": "success",
-            "msg": f"✓ 검색 및 시트/DB 저장 완료: 총 {len(filtered_results)}개 항목 추가됨 (중복 {skipped_count}개 패스)",
-            "data": [{"순위": i, "제목": r["제목"], "채널명": r["채널명"], "조회수": r["조회수"]} for i, r in enumerate(filtered_results, 1)]
+            "status": status_tag,
+            "msg": res_msg,
+            "data": [{"순위": i, "제목": r.get("제목") or r.get("Video Title") or "N/A", "채널명": r.get("채널명") or r.get("Channel Name") or "N/A", "조회수": r.get("조회수") or r.get("Views") or 0} for i, r in enumerate(results, 1)]
         }
         
     except Exception as search_err:
+        traceback.print_exc()
+        logger.error(f"❌ 유튜브 검색 진행 중 치명적 예외 발생: {search_err}", exc_info=True)
         search_state.is_running = False
         search_state.result = {
             "status": "error",
             "msg": f"✗ 검색 진행 중 에러 발생: {search_err}"
         }
-        search_state.log_history.append(f"❌ 작업 에러 발생: {search_err}")
+        log_and_append(f"❌ 작업 에러 발생: {search_err}", "error")
 
 
 def run_collection_work(
@@ -3862,8 +4179,30 @@ with tabs[4]:
         
         # 2. 검색 조건
         search_keyword = st.text_input("검색 키워드", value=saved_ui.get("ext_search_keyword", ""), key="ext_search_keyword", help="유튜브에서 검색할 검색어 키워드를 입력해 주세요.")
-        search_limit = st.number_input("최대 결과 개수 (1~50)", min_value=1, max_value=50, value=int(saved_ui.get("ext_search_limit", 20)), key="ext_search_limit")
+        limit_options = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
+        saved_limit = int(saved_ui.get("ext_search_limit", 50))
+        if saved_limit not in limit_options:
+            limit_options.append(saved_limit)
+            limit_options.sort()
+        default_limit_idx = limit_options.index(saved_limit) if saved_limit in limit_options else 0
+        search_limit = st.selectbox("최대 결과 개수 (50개 단위)", limit_options, index=default_limit_idx, key="ext_search_limit")
         
+        # 신규 국가 필터 옵션 추가
+        country_list = get_country_list()
+        saved_search_country = saved_ui.get("ext_search_country", "한국")
+        search_country_idx = country_list.index(saved_search_country) if saved_search_country in country_list else 0
+        search_country = st.selectbox("필터 기준 국가 선택", country_list, index=search_country_idx, key="ext_search_country")
+        
+        col_chk1, col_chk2 = st.columns(2)
+        with col_chk1:
+            exclude_country = st.checkbox("선택 국가 채널 제외", value=saved_ui.get("ext_exclude_country", False), key="ext_exclude_country")
+        with col_chk2:
+            only_country = st.checkbox("선택 국가 채널만 수집", value=saved_ui.get("ext_only_country", False), key="ext_only_country")
+            
+        # 상호 배타성 실시간 보정
+        if exclude_country and only_country:
+            st.warning("⚠️ '제외'와 '만 수집'은 동시에 활성화할 수 없습니다.")
+            
         search_orders = {
             'relevance (관련성 순)': 'relevance',
             'date (최신 순)': 'date',
@@ -3952,7 +4291,10 @@ with tabs[4]:
                         search_duration,
                         search_sheet_url,
                         search_sheet_name,
-                        search_creds
+                        search_creds,
+                        search_country,
+                        exclude_country,
+                        only_country
                     ),
                     daemon=True
                 )
@@ -4000,6 +4342,7 @@ with tabs[4]:
             st.info("💡 현재 상태: 대기 중")
             
             if 'search_shared_state' in st.session_state and st.session_state['search_shared_state'] is not None:
+                state_s = st.session_state['search_shared_state']
                 st.code("\n".join(state_s.log_history))
             else:
                 st.code("\n".join(st.session_state['search_log_history']))
@@ -4013,6 +4356,206 @@ with tabs[4]:
                         st.dataframe(df_res_s, use_container_width=True)
                 else:
                     st.error(res_s.get('msg'))
+
+    # --------------------------------------------------------------------------
+    # 유튜브 검색결과 대시보드 구현 시작
+    # --------------------------------------------------------------------------
+    st.markdown("---")
+    col_dash_title, col_dash_ref = st.columns([4, 1])
+    with col_dash_title:
+        st.subheader("📊 유튜브 검색결과 대시보드")
+    with col_dash_ref:
+        if st.button("🔄 대시보드 새로고침", key="btn_search_dash_refresh", use_container_width=True):
+            st.rerun()
+    
+    # 1. 키워드 목록 조회
+    try:
+        import sqlite3
+        conn = sqlite3.connect(os.path.join(current_dir, DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT keyword FROM sheet_videos WHERE tab_name = '키워드 검색결과' AND keyword IS NOT NULL AND keyword != '' ORDER BY keyword ASC")
+        kw_options = [r[0] for r in cursor.fetchall() if r[0]]
+        conn.close()
+    except Exception as kw_err:
+        kw_options = []
+        
+    if not kw_options:
+        st.info("💡 아직 유튜브 검색결과 데이터가 로컬 DB에 존재하지 않습니다. 상단 검색 옵션을 채우고 검색을 실행하여 데이터를 적재해 주세요.")
+    else:
+        # 필터 구성
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            selected_kw = st.selectbox("조회할 검색 키워드 선택", ["전체 키워드"] + kw_options, key="search_dash_kw")
+        with col_f2:
+            search_sort = st.selectbox("정렬 기준", ["최신 검색일 순", "조회수 높은 순", "좋아요 높은 순", "댓글 높은 순", "구독자 높은 순"], key="search_dash_sort")
+            
+        col_f3, col_f4 = st.columns([1, 1])
+        with col_f3:
+            search_layout = st.radio("레이아웃 스타일", ["캐러셀형 (카드 그리드)", "리스트형 (썸네일 포함)"], horizontal=True, key="search_dash_layout")
+        with col_f4:
+            search_highlight_ratio = st.number_input(
+                "📊 조회수 비율 강조 기준 (배 이상)",
+                min_value=0.0,
+                value=10.0,
+                step=1.0,
+                key="search_dash_highlight_ratio",
+                help="구독자수 대비 조회수 배율이 설정한 배수 이상일 때 대시보드에서 강조 색상(형광색)으로 표출합니다."
+            )
+            
+        # 데이터 로드
+        try:
+            conn = sqlite3.connect(os.path.join(current_dir, DB_PATH))
+            query = "SELECT * FROM sheet_videos WHERE tab_name = '키워드 검색결과'"
+            params = []
+            if selected_kw != "전체 키워드":
+                query += " AND keyword = ?"
+                params.append(selected_kw)
+                
+            # 정렬
+            if search_sort == "조회수 높은 순":
+                query += " ORDER BY views DESC, crawl_date DESC"
+            elif search_sort == "좋아요 높은 순":
+                query += " ORDER BY likes DESC, crawl_date DESC"
+            elif search_sort == "댓글 높은 순":
+                query += " ORDER BY comments DESC, crawl_date DESC"
+            elif search_sort == "구독자 높은 순":
+                query += " ORDER BY subscribers DESC, crawl_date DESC"
+            else:
+                query += " ORDER BY crawl_date DESC, original_row_order ASC"
+                
+            df_search = pd.read_sql_query(query, conn, params=params)
+            conn.close()
+        except Exception as load_err:
+            st.error(f"유튜브 검색 DB 로드 에러: {load_err}")
+            df_search = pd.DataFrame()
+            
+        if df_search.empty:
+            st.warning("선택한 키워드에 해당하는 검색결과 데이터가 없습니다.")
+        else:
+            # video_id 기준 중복 제거 (최신 crawl_date 기준 보존)
+            if 'crawl_date' in df_search.columns:
+                df_search['crawl_date_parsed'] = pd.to_datetime(df_search['crawl_date'], errors='coerce')
+                df_search = df_search.sort_values(by=['crawl_date_parsed', 'original_row_order'], ascending=[False, True])
+            
+            if 'video_id' in df_search.columns:
+                df_search = df_search.drop_duplicates(subset=['video_id'], keep='first')
+                
+            # 다시 선택된 정렬 기준으로 재정렬
+            if search_sort == "조회수 높은 순":
+                df_search = df_search.sort_values(by='views', ascending=False)
+            elif search_sort == "좋아요 높은 순":
+                df_search = df_search.sort_values(by='likes', ascending=False)
+            elif search_sort == "댓글 높은 순":
+                df_search = df_search.sort_values(by='comments', ascending=False)
+            elif search_sort == "구독자 높은 순":
+                df_search = df_search.sort_values(by='subscribers', ascending=False)
+            elif search_sort == "최신 검색일 순":
+                if 'crawl_date_parsed' in df_search.columns:
+                    df_search = df_search.sort_values(by='crawl_date_parsed', ascending=False)
+            
+            # 대시보드 그리기
+            st.info(f"💡 총 {len(df_search):,}개의 검색결과 영상이 표시되고 있습니다.")
+            
+            is_list_mode = (search_layout == "리스트형 (썸네일 포함)")
+            
+            if is_list_mode:
+                for idx, (_, row) in enumerate(df_search.iterrows()):
+                    title = row.get("title", "이름 없음")
+                    channel_name = row.get("channel_name", "N/A")
+                    views = row.get("views", 0)
+                    likes = row.get("likes", 0)
+                    comments = row.get("comments", 0)
+                    subscribers = row.get("subscribers", 0)
+                    ratio = row.get("sub_to_view_ratio", 0.0)
+                    kw_badge = row.get("keyword", "N/A")
+                    c_date = row.get("crawl_date", "N/A")
+                    img_url = row.get("thumbnail_link", "")
+                    
+                    if not img_url or img_url == "N/A" or not img_url.startswith("http"):
+                        img_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60"
+                        
+                    views_fmt = f"{views:,}" if isinstance(views, int) else str(views)
+                    likes_fmt = f"{likes:,}" if isinstance(likes, int) else str(likes)
+                    comments_fmt = f"{comments:,}" if isinstance(comments, int) else str(comments)
+                    sub_fmt = f"{subscribers:,}" if isinstance(subscribers, int) else str(subscribers)
+                    
+                    ratio_html = f"<span class='list-metric' style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio:.1f}배</span>" if ratio >= search_highlight_ratio else f"<span class='list-metric'>📊 조회수 비율: {ratio:.1f}배</span>"
+                    meta_info = f"<span class='list-metric'>👁️ 조회수: {views_fmt}</span><span class='list-metric'>❤️ 좋아요: {likes_fmt}</span><span class='list-metric'>💬 댓글: {comments_fmt}</span>{ratio_html}"
+                    
+                    safe_title = clean_js_text(title)
+                    safe_channel = clean_js_text(channel_name)
+                    
+                    list_content = f"""
+                    <div class="list-card" onclick="window.openCopyModal('{safe_title}', '{safe_channel}')" style="cursor: pointer;" title="클릭 시 제목/채널명 복사 팝업 표시">
+                        <span class="list-badge"># {idx + 1}</span>
+                        <div class="list-thumbnail-container">
+                            <img src="{img_url}" class="list-thumbnail" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
+                        </div>
+                        <div class="list-content">
+                            <div class="list-title">{title}</div>
+                            <div class="list-info">
+                                <div style="margin-bottom: 4px;">
+                                    <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>🔍 {kw_badge}</span>
+                                    <span style='background-color: #16a085; color: #ffffff; border-radius: 4px; padding: 2px 6px; font-size: 0.95em; margin-right: 10px; font-weight: bold;'>📅 {c_date[:10] if c_date else 'N/A'}</span>
+                                    <span class="list-channel-name">👤 채널명: {channel_name}</span>
+                                </div>
+                                <div style="margin-top: 4px;">
+                                    <span class="list-subscribers" style="color: #ffffff; font-size: 1.1em;">👥 구독자수: {sub_fmt}</span>
+                                </div>
+                                <div style="margin-top: 4px;">
+                                    {meta_info}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    st.html(list_content)
+            else:
+                cols = st.columns(4)
+                for idx, (_, row) in enumerate(df_search.iterrows()):
+                    col_idx = idx % 4
+                    with cols[col_idx]:
+                        title = row.get("title", "이름 없음")
+                        channel_name = row.get("channel_name", "N/A")
+                        views = row.get("views", 0)
+                        likes = row.get("likes", 0)
+                        comments = row.get("comments", 0)
+                        subscribers = row.get("subscribers", 0)
+                        ratio = row.get("sub_to_view_ratio", 0.0)
+                        kw_badge = row.get("keyword", "N/A")
+                        c_date = row.get("crawl_date", "N/A")
+                        img_url = row.get("thumbnail_link", "")
+                        
+                        if not img_url or img_url == "N/A" or not img_url.startswith("http"):
+                            img_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60"
+                            
+                        views_fmt = f"{views:,}" if isinstance(views, int) else str(views)
+                        likes_fmt = f"{likes:,}" if isinstance(likes, int) else str(likes)
+                        comments_fmt = f"{comments:,}" if isinstance(comments, int) else str(comments)
+                        sub_fmt = f"{subscribers:,}" if isinstance(subscribers, int) else str(subscribers)
+                        
+                        ratio_html = f"<span style='color:#00ffcc; font-weight:bold;'>📊 조회수 비율: {ratio:.1f}배</span>" if ratio >= search_highlight_ratio else f"📊 조회수 비율: {ratio:.1f}배"
+                        metric_html = f"<div class='card-info'>👁️ 조회수: {views_fmt}<br>❤️ 좋아요: {likes_fmt}<br>👥 구독자: {sub_fmt}<br>{ratio_html}</div>"
+                        
+                        safe_title = clean_js_text(title)
+                        safe_channel = clean_js_text(channel_name)
+                        
+                        card_content = f"""
+                        <div class="dashboard-card" onclick="window.openCopyModal('{safe_title}', '{safe_channel}')" style="cursor: pointer;" title="클릭 시 제목/채널명 복사 팝업 표시">
+                            <span class="rank-badge"># {idx + 1}</span>
+                            <div style="width:100%; height:130px; border-radius:8px; overflow:hidden; margin-bottom:8px;">
+                                <img src="{img_url}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=300&auto=format&fit=crop&q=60'"/>
+                            </div>
+                            <div class="card-title">{title}</div>
+                            <div style="margin-bottom:6px;">
+                                <span style='background-color: #2c3e50; color: #ecf0f1; border-radius: 4px; padding: 1px 5px; font-size: 0.85em; font-weight: bold;'>🏷️ {kw_badge[:10]}</span>
+                                <span class="card-channel-name" style="font-size:0.95em;">👤 {channel_name}</span>
+                            </div>
+                            {metric_html}
+                            <div style="font-size:0.8em; color:#a0a0a5; margin-top:5px; text-align:right;">📅 {c_date[:10] if c_date else 'N/A'}</div>
+                        </div>
+                        """
+                        st.html(card_content)
 
 
 # ==============================================================================
